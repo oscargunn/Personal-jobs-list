@@ -5,8 +5,12 @@ import random
 import string
 from datetime import datetime, date
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
+try:
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    _GCAL_PKGS = True
+except ImportError:
+    _GCAL_PKGS = False
 
 st.set_page_config(page_title="Personal Tasks", page_icon=None, layout="wide")
 
@@ -39,6 +43,8 @@ def has_gcal_secrets() -> bool:
 
 
 def _get_service():
+    if not _GCAL_PKGS:
+        return None
     try:
         info  = dict(st.secrets["gcp_service_account"])
         creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
@@ -519,7 +525,9 @@ with hc3:
 with hc4:
     filter_status = st.selectbox("Status", ["All", "Pending", "In Progress", "Completed"], label_visibility="collapsed")
 with hc5:
-    if not has_gcal_secrets():
+    if not _GCAL_PKGS:
+        st.markdown("<p class='gcal-warn'>⚠ Reboot app to finish setup</p>", unsafe_allow_html=True)
+    elif not has_gcal_secrets():
         st.markdown("<p class='gcal-warn'>⚠ Add GCP secrets to sync calendar</p>", unsafe_allow_html=True)
     elif gcal_connected():
         st.markdown("<p class='gcal-status'>📅 Calendar syncing</p>", unsafe_allow_html=True)
