@@ -151,6 +151,8 @@ def sync_from_calendar(target_list: str) -> int:
         for ev in events:
             if ev["id"] in existing_ids:
                 continue
+            if ev.get("recurringEventId"):   # skip auto-rolling/recurring events
+                continue
             start = ev.get("start", {})
             if "dateTime" in start:
                 dt       = datetime.fromisoformat(start["dateTime"])
