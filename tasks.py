@@ -467,11 +467,9 @@ def render_active_card(job: dict, lk: str):
                 m = int((ms_left % 3_600_000) / 60_000)
                 meta.append(f"Archives in {h}h {m}m")
 
-        _dm        = st.session_state.get("dark_mode")
-        _tc        = "#c0c0c0" if _dm else "#374151"
-        meta_html  = f"<p style='font-size:11px;color:#9ca3af;margin:1px 0 0;'>{'  ·  '.join(meta)}</p>" if meta else ""
-        notes_html = f"<p style='font-size:11px;color:{_tc};margin:1px 0 0;'>{job['notes']}</p>" if job.get("notes") else ""
-        desc_html  = f"<p style='font-size:11px;color:{_tc};margin:1px 0 0;'>{job['description']}</p>" if job.get("description") else ""
+        meta_html  = f"<p style='font-size:11px;color:#94a3b8;margin:1px 0 0;'>{'  ·  '.join(meta)}</p>" if meta else ""
+        notes_html = f"<p style='font-size:11px;color:#374151;margin:1px 0 0;'>{job['notes']}</p>" if job.get("notes") else ""
+        desc_html  = f"<p style='font-size:11px;color:#374151;margin:1px 0 0;'>{job['description']}</p>" if job.get("description") else ""
 
         st.markdown(
             badge(job["priority"], PRIORITY_STYLES[job["priority"]]) + " " +
@@ -561,7 +559,6 @@ if "initialized" not in st.session_state:
         "dlg_open":      False,
         "dlg_job_id":    None,
         "dlg_location":  tabs[0] if tabs else DEFAULT_TABS[0],
-        "dark_mode":     False,
         "initialized":   True,
     })
 
@@ -635,107 +632,94 @@ code { font-family: 'DM Mono', monospace !important; font-size: 11px !important;
 
 .gcal-status { font-size: 12px; font-weight: 500; color: #15803d; margin-top: 8px; }
 .gcal-warn   { font-size: 12px; color: #94a3b8; margin-top: 8px; }
-</style>
-""", unsafe_allow_html=True)
 
-# ── Dark mode CSS (injected only when toggled on) ─────────────────────────────
+/* ── Automatic dark mode — Claude palette ── */
+@media (prefers-color-scheme: dark) {
 
-if st.session_state.get("dark_mode"):
-    st.markdown("""
-<style>
-/* ── Backgrounds ── */
-.stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
-[data-testid="stHeader"], .block-container {
-    background-color: #1a1a1a !important;
+    /* Backgrounds */
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
+    [data-testid="stHeader"], .block-container {
+        background-color: #1a1a1a !important;
+    }
+
+    /* Typography */
+    html, body, p, span, div, label, [class*="css"], .stMarkdown {
+        color: #f0f0f0 !important;
+    }
+    .app-title    { color: #ffffff !important; }
+    .app-subtitle { color: #9ca3af !important; }
+    h4            { color: #9ca3af !important; }
+
+    /* Card text (overrides the hardcoded inline colours) */
+    div[data-testid="stVerticalBlockBorderWrapper"] p { color: #c0c0c0 !important; }
+
+    /* Dividers */
+    hr { border-color: #333333 !important; }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #333333 !important; background: transparent !important; }
+    .stTabs [data-baseweb="tab"]      { color: #9ca3af !important; }
+    .stTabs [aria-selected="true"]    { color: #ffffff !important; border-bottom: 2px solid #ffffff !important; background: transparent !important; }
+
+    /* Cards */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #262626 !important;
+        border-color: #333333 !important;
+    }
+
+    /* Inputs */
+    .stTextInput input, .stTextArea textarea {
+        background-color: #2d2d2d !important;
+        color: #f0f0f0 !important;
+        border-color: #3a3a3a !important;
+    }
+    .stTextInput input::placeholder, .stTextArea textarea::placeholder { color: #6b7280 !important; }
+
+    /* Selectboxes */
+    .stSelectbox [data-baseweb="select"] > div, div[data-baseweb="select"] > div {
+        background-color: #2d2d2d !important;
+        color: #f0f0f0 !important;
+        border-color: #3a3a3a !important;
+    }
+    [data-baseweb="menu"], [data-baseweb="popover"] { background-color: #262626 !important; }
+    [data-baseweb="option"]       { background-color: #262626 !important; color: #f0f0f0 !important; }
+    [data-baseweb="option"]:hover { background-color: #333333 !important; }
+
+    /* Secondary buttons */
+    .stButton button[kind="secondary"] {
+        background: #2d2d2d !important; border: 1px solid #3a3a3a !important;
+        color: #9ca3af !important; filter: none !important;
+    }
+    .stButton button[kind="secondary"]:hover { background: #383838 !important; color: #f0f0f0 !important; }
+
+    /* Misc */
+    .stCheckbox label, .stRadio label, [data-testid="stRadio"] { color: #f0f0f0 !important; }
+    .stCaptionContainer, [data-testid="stCaptionContainer"] { color: #9ca3af !important; }
+    code { background: #2d2d2d !important; color: #9ca3af !important; }
+
+    /* Expander */
+    [data-testid="stExpander"]         { border-color: #333333 !important; background-color: #1a1a1a !important; }
+    [data-testid="stExpander"] summary { color: #f0f0f0 !important; }
+
+    /* Dialog */
+    [data-testid="stDialog"] > div, [data-baseweb="modal"] > div {
+        background-color: #1f1f1f !important;
+        border: 1px solid #333333 !important;
+    }
+
+    /* Toast */
+    [data-testid="stToast"] { background-color: #262626 !important; color: #f0f0f0 !important; }
+
+    /* Calendar status */
+    .gcal-status { color: #34d399 !important; }
+    .gcal-warn   { color: #9ca3af !important; }
 }
-
-/* ── Typography ── */
-html, body, p, span, div, label, [class*="css"], .stMarkdown {
-    color: #f0f0f0 !important;
-}
-.app-title    { color: #ffffff !important; }
-.app-subtitle { color: #9ca3af !important; }
-h4 { color: #9ca3af !important; }
-
-/* ── Dividers & borders ── */
-hr { border-color: #333333 !important; }
-
-/* ── Tabs ── */
-.stTabs [data-baseweb="tab-list"]  { border-bottom: 1px solid #333333 !important; background: transparent !important; }
-.stTabs [data-baseweb="tab"]       { color: #9ca3af !important; }
-.stTabs [aria-selected="true"]     { color: #ffffff !important; border-bottom: 2px solid #ffffff !important; background: transparent !important; }
-
-/* ── Cards ── */
-div[data-testid="stVerticalBlockBorderWrapper"] {
-    background-color: #262626 !important;
-    border-color: #333333 !important;
-}
-
-/* ── Inputs & text areas ── */
-.stTextInput input, .stTextArea textarea {
-    background-color: #2d2d2d !important;
-    color: #f0f0f0 !important;
-    border-color: #3a3a3a !important;
-}
-.stTextInput input::placeholder, .stTextArea textarea::placeholder {
-    color: #6b7280 !important;
-}
-
-/* ── Selectboxes & dropdowns ── */
-.stSelectbox [data-baseweb="select"] > div,
-div[data-baseweb="select"] > div {
-    background-color: #2d2d2d !important;
-    color: #f0f0f0 !important;
-    border-color: #3a3a3a !important;
-}
-[data-baseweb="menu"], [data-baseweb="popover"] { background-color: #262626 !important; }
-[data-baseweb="option"]        { background-color: #262626 !important; color: #f0f0f0 !important; }
-[data-baseweb="option"]:hover  { background-color: #333333 !important; }
-
-/* ── Secondary buttons ── */
-.stButton button[kind="secondary"] {
-    background: #2d2d2d !important;
-    border: 1px solid #3a3a3a !important;
-    color: #9ca3af !important;
-    filter: none !important;
-}
-.stButton button[kind="secondary"]:hover {
-    background: #383838 !important;
-    color: #f0f0f0 !important;
-}
-
-/* ── Checkbox & radio ── */
-.stCheckbox label, .stRadio label, [data-testid="stRadio"] { color: #f0f0f0 !important; }
-
-/* ── Caption ── */
-.stCaptionContainer, [data-testid="stCaptionContainer"] { color: #9ca3af !important; }
-
-/* ── Code badges ── */
-code { background: #2d2d2d !important; color: #9ca3af !important; }
-
-/* ── Expander ── */
-[data-testid="stExpander"]         { border-color: #333333 !important; background-color: #1a1a1a !important; }
-[data-testid="stExpander"] summary { color: #f0f0f0 !important; }
-[data-testid="stExpander"] summary:hover { color: #ffffff !important; }
-
-/* ── Dialog / modal ── */
-[data-testid="stDialog"] > div, [data-baseweb="modal"] > div {
-    background-color: #1f1f1f !important;
-    border: 1px solid #333333 !important;
-}
-
-/* ── Toast ── */
-[data-testid="stToast"] { background-color: #262626 !important; color: #f0f0f0 !important; }
-
-/* ── Calendar status ── */
-.gcal-status { color: #34d399 !important; }
-.gcal-warn   { color: #9ca3af !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
-hc1, hc2, hc3, hc4, hc5, hc6, hc7 = st.columns([2, 2.5, 1.1, 1.1, 1.0, 1.2, 0.55])
+hc1, hc2, hc3, hc4, hc5, hc6 = st.columns([2, 2.8, 1.2, 1.2, 1.1, 1.3])
 with hc1:
     st.markdown("""
     <div class="app-header">
@@ -769,11 +753,6 @@ with hc6:
             else:
                 st.session_state["gcal_toast"] = "All calendars up to date"
             st.rerun()
-with hc7:
-    dm_icon = "☀️" if st.session_state.get("dark_mode") else "🌙"
-    if st.button(dm_icon, use_container_width=True, help="Toggle dark mode"):
-        st.session_state.dark_mode = not st.session_state.get("dark_mode", False)
-        st.rerun()
 
 st.markdown("---")
 
