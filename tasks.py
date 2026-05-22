@@ -60,6 +60,23 @@ def _calendar_id() -> str:
         return "primary"
 
 
+def _calendar_map() -> dict:
+    """Returns {calendar_id: tab_name} for all configured calendars.
+    Reads from [calendar_map] section in secrets; falls back to single calendar_id."""
+    try:
+        cm = dict(st.secrets.get("calendar_map", {}))
+        if cm:
+            return cm
+    except Exception:
+        pass
+    # Fallback: primary calendar → first tab
+    cid      = _calendar_id()
+    first_tab = (st.session_state.tabs_list[0]
+                 if "tabs_list" in st.session_state and st.session_state.tabs_list
+                 else "Personal")
+    return {cid: first_tab}
+
+
 def _timezone() -> str:
     try:
         return st.secrets["gcp_service_account"].get("timezone", "UTC")
@@ -130,29 +147,42 @@ def delete_gcal_event(event_id: str):
         pass
 
 
-def sync_from_calendar(target_list: str) -> int:
-    """Pull calendar events not already in the app and create tasks from them."""
+def sync_from_calendar() -> int:
+    """Pull events from all configured calendars, routing each to its mapped tab."""
     svc = _get_service()
     if not svc:
         return 0
-    try:
-        past   = (datetime.utcnow() - timedelta(days=7)).isoformat() + "Z"
-        future = (datetime.utcnow() + timedelta(days=180)).isoformat() + "Z"
-        result = svc.events().list(
-            calendarId=_calendar_id(),
-            timeMin=past, timeMax=future,
-            maxResults=200, singleEvents=True, orderBy="startTime",
-        ).execute()
-        events = result.get("items", [])
 
-        existing_ids = {j.get("calEventId") for j in st.session_state.jobs if j.get("calEventId")}
-        added = 0
+    cal_map = _calendar_map()   # {calendar_id: tab_name}
 
-        for ev in events:
+    # Auto-create any tabs that don't exist yet
+    for tab_name in cal_map.values():
+        if tab_name not in st.session_state.tabs_list:
+            st.session_state.tabs_list.append(tab_name)
+
+    past   = (datetime.utcnow() - timedelta(days=7)).isoformat() + "Z"
+    future = (datetime.utcnow() + timedelta(days=180)).isoformat() + "Z"
+
+    existing_ids = {j.get("calEventId") for j in st.session_state.jobs if j.get("calEventId")}
+    added = 0
+
+    for cal_id, tab_name in cal_map.items():
+        try:
+            result = svc.events().list(
+                calendarId=cal_id,
+                timeMin=past, timeMax=future,
+                maxResults=200, singleEvents=True, orderBy="startTime",
+            ).execute()
+        except Exception as e:
+            st.session_state["gcal_error"] = f"Could not read calendar '{tab_name}': {e}"
+            continue
+
+        for ev in result.get("items", []):
             if ev["id"] in existing_ids:
                 continue
-            if ev.get("recurringEventId"):   # skip auto-rolling/recurring events
+            if ev.get("recurringEventId"):          # skip auto-rolling events
                 continue
+
             start = ev.get("start", {})
             if "dateTime" in start:
                 dt       = datetime.fromisoformat(start["dateTime"])
@@ -164,30 +194,26 @@ def sync_from_calendar(target_list: str) -> int:
             else:
                 continue
 
-            new_job = {
+            st.session_state.jobs.append({
                 "id":          gen_id(),
                 "title":       ev.get("summary", "Untitled"),
                 "description": ev.get("description", ""),
                 "notes":       "",
                 "priority":    "Medium",
                 "status":      "Pending",
-                "location":    target_list,
+                "location":    tab_name,
                 "dueDate":     due_date,
                 "dueTime":     due_time,
                 "calEventId":  ev["id"],
                 "createdAt":   now_ms(),
                 "completedAt": None,
-            }
-            st.session_state.jobs.append(new_job)
+            })
             existing_ids.add(ev["id"])
             added += 1
 
-        if added:
-            save_data()
-        return added
-    except Exception as e:
-        st.session_state["gcal_error"] = f"Calendar sync failed: {e}"
-        return 0
+    if added:
+        save_data()
+    return added
 
 # ── Data layer ────────────────────────────────────────────────────────────────
 
@@ -638,13 +664,12 @@ with hc5:
         st.markdown("<p class='gcal-warn'>⚠ Invalid creds</p>", unsafe_allow_html=True)
 with hc6:
     if gcal_connected():
-        sync_list = st.session_state.tabs_list[0] if st.session_state.tabs_list else "Personal"
-        if st.button("⬇ Sync Calendar", use_container_width=True, help="Import new calendar events as tasks"):
-            n = sync_from_calendar(sync_list)
+        if st.button("⬇ Sync Calendar", use_container_width=True, help="Import new events from all configured calendars"):
+            n = sync_from_calendar()
             if n:
                 st.session_state["gcal_toast"] = f"Imported {n} new task{'s' if n != 1 else ''} from Calendar"
             else:
-                st.session_state["gcal_toast"] = "Calendar is up to date"
+                st.session_state["gcal_toast"] = "All calendars up to date"
             st.rerun()
 
 st.markdown("---")
