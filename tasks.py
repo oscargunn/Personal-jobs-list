@@ -3,7 +3,7 @@ import json
 import os
 import random
 import string
-from datetime import datetime, date
+from datetime import datetime, date, time, timedelta
 
 try:
     from google.oauth2 import service_account
@@ -60,6 +60,13 @@ def _calendar_id() -> str:
         return "primary"
 
 
+def _timezone() -> str:
+    try:
+        return st.secrets["gcp_service_account"].get("timezone", "UTC")
+    except Exception:
+        return "UTC"
+
+
 def gcal_connected() -> bool:
     return has_gcal_secrets() and _get_service() is not None
 
@@ -70,9 +77,22 @@ def _event_body(job: dict) -> dict:
         parts.append(f"Notes: {job['notes']}")
     if job.get("description"):
         parts.append(job["description"])
+    desc = "\n".join(parts)
+    tz   = _timezone()
+
+    if job.get("dueTime"):
+        start_str = f"{job['dueDate']}T{job['dueTime']}:00"
+        start_dt  = datetime.strptime(start_str, "%Y-%m-%dT%H:%M:%S")
+        end_str   = (start_dt + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
+        return {
+            "summary":     job["title"],
+            "description": desc,
+            "start":       {"dateTime": start_str, "timeZone": tz},
+            "end":         {"dateTime": end_str,   "timeZone": tz},
+        }
     return {
         "summary":     job["title"],
-        "description": "\n".join(parts),
+        "description": desc,
         "start":       {"date": job["dueDate"]},
         "end":         {"date": job["dueDate"]},
     }
@@ -109,6 +129,64 @@ def delete_gcal_event(event_id: str):
     except Exception:
         pass
 
+
+def sync_from_calendar(target_list: str) -> int:
+    """Pull calendar events not already in the app and create tasks from them."""
+    svc = _get_service()
+    if not svc:
+        return 0
+    try:
+        past   = (datetime.utcnow() - timedelta(days=7)).isoformat() + "Z"
+        future = (datetime.utcnow() + timedelta(days=180)).isoformat() + "Z"
+        result = svc.events().list(
+            calendarId=_calendar_id(),
+            timeMin=past, timeMax=future,
+            maxResults=200, singleEvents=True, orderBy="startTime",
+        ).execute()
+        events = result.get("items", [])
+
+        existing_ids = {j.get("calEventId") for j in st.session_state.jobs if j.get("calEventId")}
+        added = 0
+
+        for ev in events:
+            if ev["id"] in existing_ids:
+                continue
+            start = ev.get("start", {})
+            if "dateTime" in start:
+                dt       = datetime.fromisoformat(start["dateTime"])
+                due_date = dt.strftime("%Y-%m-%d")
+                due_time = dt.strftime("%H:%M")
+            elif "date" in start:
+                due_date = start["date"]
+                due_time = ""
+            else:
+                continue
+
+            new_job = {
+                "id":          gen_id(),
+                "title":       ev.get("summary", "Untitled"),
+                "description": ev.get("description", ""),
+                "notes":       "",
+                "priority":    "Medium",
+                "status":      "Pending",
+                "location":    target_list,
+                "dueDate":     due_date,
+                "dueTime":     due_time,
+                "calEventId":  ev["id"],
+                "createdAt":   now_ms(),
+                "completedAt": None,
+            }
+            st.session_state.jobs.append(new_job)
+            existing_ids.add(ev["id"])
+            added += 1
+
+        if added:
+            save_data()
+        return added
+    except Exception as e:
+        st.session_state["gcal_error"] = f"Calendar sync failed: {e}"
+        return 0
+
 # ── Data layer ────────────────────────────────────────────────────────────────
 
 def now_ms() -> float:
@@ -125,6 +203,7 @@ def load_data() -> tuple:
             jobs = d.get("jobs", [])
             for j in jobs:
                 j.setdefault("calEventId", None)
+                j.setdefault("dueTime", "")
             return jobs, d.get("tabs", list(DEFAULT_TABS)), d.get("archived_tabs", [])
         except Exception:
             pass
@@ -190,7 +269,7 @@ def upsert_job(data: dict, job_id: str | None = None):
                 saved = st.session_state.jobs[i]
                 break
     else:
-        new_job = {**data, "id": gen_id(), "createdAt": now_ms(), "completedAt": None, "calEventId": None}
+        new_job = {**data, "id": gen_id(), "createdAt": now_ms(), "completedAt": None, "calEventId": None, "dueTime": data.get("dueTime", "")}
         st.session_state.jobs.append(new_job)
         saved = new_job
 
@@ -199,15 +278,21 @@ def upsert_job(data: dict, job_id: str | None = None):
     old_due      = (old_job or {}).get("dueDate", "")
     old_event_id = (old_job or {}).get("calEventId")
 
+    new_time = data.get("dueTime", "")
+    old_time = (old_job or {}).get("dueTime", "")
+
     if is_new:
         if new_due:
             eid = create_gcal_event(saved)
             if eid:
                 saved["calEventId"] = eid
-                st.session_state["gcal_toast"] = f"Added to Google Calendar ({new_due})"
+                label = f"{new_due} {new_time}" if new_time else new_due
+                st.session_state["gcal_toast"] = f"Added to Google Calendar ({label})"
     else:
         if new_due and old_event_id:
-            if new_due != old_due or data.get("title") != old_job.get("title"):
+            changed = (new_due != old_due or new_time != old_time or
+                       data.get("title") != old_job.get("title"))
+            if changed:
                 update_gcal_event(old_event_id, saved)
                 st.session_state["gcal_toast"] = "Calendar event updated"
         elif new_due and not old_event_id:
@@ -252,17 +337,31 @@ def task_dialog():
         loc_idx = all_tabs.index(cur_loc)
     location = st.selectbox("List", all_tabs, index=loc_idx)
 
-    try:
-        due_val = date.fromisoformat(job["dueDate"]) if job and job.get("dueDate") else None
-    except ValueError:
-        due_val = None
-    due_date = st.date_input("Due Date", value=due_val)
+    dc1, dc2 = st.columns([3, 2])
+    with dc1:
+        try:
+            due_val = date.fromisoformat(job["dueDate"]) if job and job.get("dueDate") else None
+        except ValueError:
+            due_val = None
+        due_date = st.date_input("Due Date", value=due_val)
+    with dc2:
+        existing_time = job.get("dueTime", "") if job else ""
+        use_time = st.checkbox("Set time", value=bool(existing_time), key="dlg_use_time")
+        if use_time:
+            try:
+                t_val = datetime.strptime(existing_time, "%H:%M").time() if existing_time else time(9, 0)
+            except ValueError:
+                t_val = time(9, 0)
+            due_time_val = st.time_input("Time", value=t_val, label_visibility="collapsed")
+            due_time = due_time_val.strftime("%H:%M")
+        else:
+            due_time = ""
 
     notes = st.text_area("Notes", value=job.get("notes", "") if job else "", height=70)
 
     # Calendar status hint
     if job and job.get("calEventId"):
-        st.caption("📅 Synced to Google Calendar — updating due date will move the event")
+        st.caption("📅 Synced to Google Calendar — changes update the event automatically")
     elif due_date and gcal_connected():
         st.caption("📅 Will be added to Google Calendar on save")
     elif due_date and not gcal_connected():
@@ -286,6 +385,7 @@ def task_dialog():
                 "status":      status,
                 "location":    location,
                 "dueDate":     str(due_date) if due_date else "",
+                "dueTime":     due_time,
                 "notes":       notes,
             },
             job_id=job_id,
@@ -329,8 +429,9 @@ def render_active_card(job: dict, lk: str):
 
         meta = []
         if job.get("dueDate"):
-            cal_badge = " 📅" if job.get("calEventId") else ""
-            meta.append(f"Due {job['dueDate']}{cal_badge}")
+            cal_badge  = " 📅" if job.get("calEventId") else ""
+            time_label = f" {job['dueTime']}" if job.get("dueTime") else ""
+            meta.append(f"Due {job['dueDate']}{time_label}{cal_badge}")
         if job["status"] == "Completed" and job.get("completedAt"):
             ms_left = job["completedAt"] + 48 * 3_600_000 - now_ms()
             if ms_left > 0:
@@ -508,7 +609,7 @@ code { font-family: 'DM Mono', monospace !important; font-size: 11px !important;
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
-hc1, hc2, hc3, hc4, hc5 = st.columns([2, 3, 1.2, 1.2, 1.6])
+hc1, hc2, hc3, hc4, hc5, hc6 = st.columns([2, 2.8, 1.2, 1.2, 1.1, 1.3])
 with hc1:
     st.markdown("""
     <div class="app-header">
@@ -526,13 +627,23 @@ with hc4:
     filter_status = st.selectbox("Status", ["All", "Pending", "In Progress", "Completed"], label_visibility="collapsed")
 with hc5:
     if not _GCAL_PKGS:
-        st.markdown("<p class='gcal-warn'>⚠ Reboot app to finish setup</p>", unsafe_allow_html=True)
+        st.markdown("<p class='gcal-warn'>⚠ Reboot app</p>", unsafe_allow_html=True)
     elif not has_gcal_secrets():
-        st.markdown("<p class='gcal-warn'>⚠ Add GCP secrets to sync calendar</p>", unsafe_allow_html=True)
+        st.markdown("<p class='gcal-warn'>⚠ Add secrets</p>", unsafe_allow_html=True)
     elif gcal_connected():
-        st.markdown("<p class='gcal-status'>📅 Calendar syncing</p>", unsafe_allow_html=True)
+        st.markdown("<p class='gcal-status'>📅 Connected</p>", unsafe_allow_html=True)
     else:
-        st.markdown("<p class='gcal-warn'>⚠ Calendar credentials invalid</p>", unsafe_allow_html=True)
+        st.markdown("<p class='gcal-warn'>⚠ Invalid creds</p>", unsafe_allow_html=True)
+with hc6:
+    if gcal_connected():
+        sync_list = st.session_state.tabs_list[0] if st.session_state.tabs_list else "Personal"
+        if st.button("⬇ Sync Calendar", use_container_width=True, help="Import new calendar events as tasks"):
+            n = sync_from_calendar(sync_list)
+            if n:
+                st.session_state["gcal_toast"] = f"Imported {n} new task{'s' if n != 1 else ''} from Calendar"
+            else:
+                st.session_state["gcal_toast"] = "Calendar is up to date"
+            st.rerun()
 
 st.markdown("---")
 
