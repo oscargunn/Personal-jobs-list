@@ -5,9 +5,7 @@ import random
 import string
 from datetime import datetime, date
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
+from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 st.set_page_config(page_title="Personal Tasks", page_icon=None, layout="wide")
@@ -27,66 +25,37 @@ STATUS_STYLES = {
     "Archived":    {"bg": "#f8fafc", "color": "#94a3b8", "dot": "#cbd5e1"},
 }
 
-DEFAULT_TABS  = ["Personal", "Work", "Home"]
-STORAGE_FILE  = "tasks_data.json"
-TOKEN_FILE    = "token.json"
-SCOPES        = ["https://www.googleapis.com/auth/calendar.events"]
-REDIRECT_URI  = "http://localhost:8501"
+DEFAULT_TABS = ["Personal", "Work", "Home"]
+STORAGE_FILE = "tasks_data.json"
+SCOPES       = ["https://www.googleapis.com/auth/calendar.events"]
 
 # ── Google Calendar helpers ───────────────────────────────────────────────────
 
 def has_gcal_secrets() -> bool:
     try:
-        return bool(st.secrets.get("google", {}).get("client_id"))
+        return bool(st.secrets.get("gcp_service_account", {}).get("client_email"))
     except Exception:
         return False
 
 
-def _build_flow() -> Flow:
-    cfg = {
-        "web": {
-            "client_id":     st.secrets["google"]["client_id"],
-            "client_secret": st.secrets["google"]["client_secret"],
-            "auth_uri":      "https://accounts.google.com/o/oauth2/auth",
-            "token_uri":     "https://oauth2.googleapis.com/token",
-            "redirect_uris": [REDIRECT_URI],
-        }
-    }
-    return Flow.from_client_config(cfg, scopes=SCOPES, redirect_uri=REDIRECT_URI)
-
-
-def get_auth_url() -> str:
-    flow = _build_flow()
-    auth_url, state = flow.authorization_url(access_type="offline", prompt="consent")
-    st.session_state["oauth_state"] = state
-    return auth_url
-
-
-def handle_oauth_callback(code: str):
-    flow = _build_flow()
-    flow.fetch_token(code=code)
-    with open(TOKEN_FILE, "w") as f:
-        f.write(flow.credentials.to_json())
-
-
 def _get_service():
-    if not os.path.exists(TOKEN_FILE):
-        return None
     try:
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            with open(TOKEN_FILE, "w") as f:
-                f.write(creds.to_json())
-        if creds and creds.valid:
-            return build("calendar", "v3", credentials=creds)
+        info  = dict(st.secrets["gcp_service_account"])
+        creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+        return build("calendar", "v3", credentials=creds)
     except Exception:
-        pass
-    return None
+        return None
+
+
+def _calendar_id() -> str:
+    try:
+        return st.secrets["gcp_service_account"].get("calendar_id", "primary")
+    except Exception:
+        return "primary"
 
 
 def gcal_connected() -> bool:
-    return _get_service() is not None
+    return has_gcal_secrets() and _get_service() is not None
 
 
 def _event_body(job: dict) -> dict:
@@ -108,7 +77,7 @@ def create_gcal_event(job: dict) -> str | None:
     if not svc or not job.get("dueDate"):
         return None
     try:
-        result = svc.events().insert(calendarId="primary", body=_event_body(job)).execute()
+        result = svc.events().insert(calendarId=_calendar_id(), body=_event_body(job)).execute()
         return result.get("id")
     except Exception as e:
         st.session_state["gcal_error"] = f"Calendar error: {e}"
@@ -120,7 +89,7 @@ def update_gcal_event(event_id: str, job: dict):
     if not svc or not event_id:
         return
     try:
-        svc.events().update(calendarId="primary", eventId=event_id, body=_event_body(job)).execute()
+        svc.events().update(calendarId=_calendar_id(), eventId=event_id, body=_event_body(job)).execute()
     except Exception as e:
         st.session_state["gcal_error"] = f"Calendar update failed: {e}"
 
@@ -130,7 +99,7 @@ def delete_gcal_event(event_id: str):
     if not svc or not event_id:
         return
     try:
-        svc.events().delete(calendarId="primary", eventId=event_id).execute()
+        svc.events().delete(calendarId=_calendar_id(), eventId=event_id).execute()
     except Exception:
         pass
 
@@ -458,20 +427,6 @@ if "initialized" not in st.session_state:
         "initialized":   True,
     })
 
-# ── OAuth callback ────────────────────────────────────────────────────────────
-
-params = st.query_params
-if "code" in params and has_gcal_secrets():
-    try:
-        handle_oauth_callback(params["code"])
-        st.query_params.clear()
-        st.session_state["gcal_toast"] = "Google Calendar connected!"
-        st.rerun()
-    except Exception as e:
-        st.query_params.clear()
-        st.session_state["gcal_error"] = f"Auth failed: {e}"
-        st.rerun()
-
 auto_archive()
 
 # ── Deferred toasts ───────────────────────────────────────────────────────────
@@ -565,11 +520,11 @@ with hc4:
     filter_status = st.selectbox("Status", ["All", "Pending", "In Progress", "Completed"], label_visibility="collapsed")
 with hc5:
     if not has_gcal_secrets():
-        st.markdown("<p class='gcal-warn'>Add Google secrets to enable calendar sync</p>", unsafe_allow_html=True)
+        st.markdown("<p class='gcal-warn'>⚠ Add GCP secrets to sync calendar</p>", unsafe_allow_html=True)
     elif gcal_connected():
-        st.markdown("<p class='gcal-status'>📅 Calendar connected</p>", unsafe_allow_html=True)
+        st.markdown("<p class='gcal-status'>📅 Calendar syncing</p>", unsafe_allow_html=True)
     else:
-        st.link_button("📅 Connect Calendar", get_auth_url(), use_container_width=True)
+        st.markdown("<p class='gcal-warn'>⚠ Calendar credentials invalid</p>", unsafe_allow_html=True)
 
 st.markdown("---")
 
