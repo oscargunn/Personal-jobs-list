@@ -437,12 +437,23 @@ def badge(text: str, style: dict) -> str:
     )
 
 
+PREVIEW_LEN = 90   # chars shown in collapsed notes before truncation
+
 def render_active_card(job: dict, lk: str):
+    expanded_cards = st.session_state.setdefault("expanded_cards", set())
+    is_expanded    = job["id"] in expanded_cards
+
+    notes       = job.get("notes", "")
+    description = job.get("description", "")
+    has_overflow = len(notes) > PREVIEW_LEN or bool(description)
+
     with st.container(border=True):
         tc, ec, dc = st.columns([5, 1, 1])
         with tc:
             st.markdown(
-                f"<p style='margin:0;font-size:13px;font-weight:600;line-height:1.3;color:#0f172a;'>{job['title']}</p>",
+                f"<p style='margin:0;font-size:13px;font-weight:600;line-height:1.3;"
+                f"color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                f"max-width:100%;'>{job['title']}</p>",
                 unsafe_allow_html=True,
             )
         with ec:
@@ -455,6 +466,7 @@ def render_active_card(job: dict, lk: str):
                 remove_job(job["id"])
                 st.rerun()
 
+        # ── Meta line (always visible) ──────────────────────────────────────
         meta = []
         if job.get("dueDate"):
             cal_badge  = " 📅" if job.get("calEventId") else ""
@@ -467,9 +479,28 @@ def render_active_card(job: dict, lk: str):
                 m = int((ms_left % 3_600_000) / 60_000)
                 meta.append(f"Archives in {h}h {m}m")
 
-        meta_html  = f"<p style='font-size:11px;color:#94a3b8;margin:1px 0 0;'>{'  ·  '.join(meta)}</p>" if meta else ""
-        notes_html = f"<p style='font-size:11px;color:#374151;margin:1px 0 0;'>{job['notes']}</p>" if job.get("notes") else ""
-        desc_html  = f"<p style='font-size:11px;color:#374151;margin:1px 0 0;'>{job['description']}</p>" if job.get("description") else ""
+        meta_html = (
+            f"<p style='font-size:11px;color:#94a3b8;margin:1px 0 0;'>{'  ·  '.join(meta)}</p>"
+            if meta else ""
+        )
+
+        # ── Notes / description (collapsed = preview only) ──────────────────
+        if is_expanded:
+            notes_html = (
+                f"<p style='font-size:11px;color:#374151;margin:2px 0 0;'>{notes}</p>"
+                if notes else ""
+            )
+            desc_html = (
+                f"<p style='font-size:11px;color:#374151;margin:2px 0 0;'>{description}</p>"
+                if description else ""
+            )
+        else:
+            preview    = (notes[:PREVIEW_LEN].rstrip() + "…") if len(notes) > PREVIEW_LEN else notes
+            notes_html = (
+                f"<p style='font-size:11px;color:#374151;margin:2px 0 0;'>{preview}</p>"
+                if notes else ""
+            )
+            desc_html  = ""   # hidden until expanded
 
         st.markdown(
             badge(job["priority"], PRIORITY_STYLES[job["priority"]]) + " " +
@@ -478,6 +509,17 @@ def render_active_card(job: dict, lk: str):
             unsafe_allow_html=True,
         )
 
+        # ── Expand / collapse toggle ────────────────────────────────────────
+        if has_overflow:
+            toggle_label = "▲ less" if is_expanded else "▼ more"
+            if st.button(toggle_label, key=f"exp_{lk}_{job['id']}", use_container_width=False):
+                if is_expanded:
+                    expanded_cards.discard(job["id"])
+                else:
+                    expanded_cards.add(job["id"])
+                st.rerun()
+
+        # ── Status selector ─────────────────────────────────────────────────
         if job["status"] != "Completed":
             opts = ["Pending", "In Progress", "Completed"]
             cur  = opts.index(job["status"]) if job["status"] in opts else 0
