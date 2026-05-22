@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import os
+import io
 import random
 import string
 from datetime import datetime, date, time, timedelta
@@ -8,6 +9,7 @@ from datetime import datetime, date, time, timedelta
 try:
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
+    from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
     _GCAL_PKGS = True
 except ImportError:
     _GCAL_PKGS = False
@@ -32,6 +34,8 @@ STATUS_STYLES = {
 DEFAULT_TABS = ["Personal", "Work", "Home"]
 STORAGE_FILE = "tasks_data.json"
 SCOPES       = ["https://www.googleapis.com/auth/calendar.events"]
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+DRIVE_FNAME  = "tasks_data.json"
 
 # ── Google Calendar helpers ───────────────────────────────────────────────────
 
@@ -215,6 +219,87 @@ def sync_from_calendar() -> int:
         save_data()
     return added
 
+# ── Google Drive persistence ──────────────────────────────────────────────────
+
+def _drive_folder_id() -> str:
+    try:
+        return st.secrets["gcp_service_account"].get("drive_folder_id", "")
+    except Exception:
+        return ""
+
+
+def _get_drive_service():
+    if not _GCAL_PKGS or not has_gcal_secrets() or not _drive_folder_id():
+        return None
+    try:
+        info  = dict(st.secrets["gcp_service_account"])
+        creds = service_account.Credentials.from_service_account_info(
+            info, scopes=DRIVE_SCOPES
+        )
+        return build("drive", "v3", credentials=creds)
+    except Exception:
+        return None
+
+
+def _get_drive_file_id() -> str | None:
+    """Return the Drive file ID for tasks_data.json, cached in session state.
+    Creates the file in the configured folder if it doesn't exist yet."""
+    if "drive_file_id" in st.session_state:
+        return st.session_state.drive_file_id
+    svc = _get_drive_service()
+    folder_id = _drive_folder_id()
+    if not svc or not folder_id:
+        st.session_state.drive_file_id = None
+        return None
+    try:
+        q       = f"name='{DRIVE_FNAME}' and '{folder_id}' in parents and trashed=false"
+        results = svc.files().list(q=q, fields="files(id)").execute()
+        files   = results.get("files", [])
+        if files:
+            fid = files[0]["id"]
+        else:
+            empty = json.dumps({"jobs": [], "tabs": list(DEFAULT_TABS), "archived_tabs": []})
+            meta  = {"name": DRIVE_FNAME, "parents": [folder_id]}
+            media = MediaIoBaseUpload(io.BytesIO(empty.encode()), mimetype="application/json")
+            fid   = svc.files().create(body=meta, media_body=media, fields="id").execute().get("id")
+        st.session_state.drive_file_id = fid
+        return fid
+    except Exception:
+        st.session_state.drive_file_id = None
+        return None
+
+
+def _load_from_drive() -> dict | None:
+    svc = _get_drive_service()
+    fid = _get_drive_file_id()
+    if not svc or not fid:
+        return None
+    try:
+        req  = svc.files().get_media(fileId=fid)
+        buf  = io.BytesIO()
+        dl   = MediaIoBaseDownload(buf, req)
+        done = False
+        while not done:
+            _, done = dl.next_chunk()
+        buf.seek(0)
+        return json.loads(buf.read().decode())
+    except Exception:
+        return None
+
+
+def _save_to_drive(data: dict):
+    svc = _get_drive_service()
+    fid = _get_drive_file_id()
+    if not svc or not fid:
+        return
+    try:
+        content = json.dumps(data, indent=2)
+        media   = MediaIoBaseUpload(io.BytesIO(content.encode()), mimetype="application/json")
+        svc.files().update(fileId=fid, media_body=media).execute()
+    except Exception:
+        pass
+
+
 # ── Data layer ────────────────────────────────────────────────────────────────
 
 def now_ms() -> float:
@@ -224,26 +309,38 @@ def gen_id() -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
 
 def load_data() -> tuple:
+    def _parse(d: dict) -> tuple:
+        jobs = d.get("jobs", [])
+        for j in jobs:
+            j.setdefault("calEventId", None)
+            j.setdefault("dueTime", "")
+        return jobs, d.get("tabs", list(DEFAULT_TABS)), d.get("archived_tabs", [])
+
+    # Try Drive first — survives redeploys
+    if _drive_folder_id():
+        d = _load_from_drive()
+        if d is not None:
+            return _parse(d)
+
+    # Local file fallback (local dev / no Drive configured)
     if os.path.exists(STORAGE_FILE):
         try:
             with open(STORAGE_FILE) as f:
-                d = json.load(f)
-            jobs = d.get("jobs", [])
-            for j in jobs:
-                j.setdefault("calEventId", None)
-                j.setdefault("dueTime", "")
-            return jobs, d.get("tabs", list(DEFAULT_TABS)), d.get("archived_tabs", [])
+                return _parse(json.load(f))
         except Exception:
             pass
+
     return [], list(DEFAULT_TABS), []
 
 def save_data():
-    with open(STORAGE_FILE, "w") as f:
-        json.dump({
-            "jobs":          st.session_state.jobs,
-            "tabs":          st.session_state.tabs_list,
-            "archived_tabs": st.session_state.archived_tabs,
-        }, f, indent=2)
+    data = {
+        "jobs":          st.session_state.jobs,
+        "tabs":          st.session_state.tabs_list,
+        "archived_tabs": st.session_state.archived_tabs,
+    }
+    _save_to_drive(data)                           # persistent across redeploys
+    with open(STORAGE_FILE, "w") as f:             # local cache / dev fallback
+        json.dump(data, f, indent=2)
 
 # ── Mutations ─────────────────────────────────────────────────────────────────
 
