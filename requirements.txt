@@ -1,4 +1,0 @@
-streamlit>=1.32
-google-auth>=2.28
-google-auth-httplib2>=0.2
-google-api-python-client>=2.120

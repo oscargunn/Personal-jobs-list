@@ -579,6 +579,15 @@ def render_active_card(job: dict, lk: str):
                 remove_job(job["id"])
                 st.rerun()
 
+        # ── Status dropdown ─────────────────────────────────────────────────
+        opts = ["Pending", "In Progress", "Completed"]
+        cur  = opts.index(job["status"]) if job["status"] in opts else 0
+        sel  = st.selectbox("Status", opts, index=cur,
+                            key=f"s_{lk}_{job['id']}", label_visibility="collapsed")
+        if sel != job["status"]:
+            set_status(job["id"], sel)
+            st.rerun()
+
         # ── Due date line ───────────────────────────────────────────────────
         meta = []
         if job.get("dueDate"):
@@ -858,6 +867,15 @@ code { font-family: 'DM Mono', monospace !important; font-size: 11px !important;
        background: #f3f4f6 !important; color: #6b7280 !important;
        border-radius: 4px !important; padding: 1px 6px !important; }
 
+/* ── In-card status selectbox ────────────────────────────────────────────── */
+div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="select"] > div {
+    min-height: 28px !important; height: 28px !important;
+    padding-top: 0 !important; padding-bottom: 0 !important;
+    font-size: 11px !important; border-color: #e5e7eb !important;
+    background: transparent !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox { margin: 4px 0 2px !important; }
+
 /* ── Kanban column headers ────────────────────────────────────────────────── */
 .col-header { font-size: 11px; font-weight: 600; color: #9ca3af; text-transform: uppercase;
               letter-spacing: 0.08em; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
@@ -890,6 +908,11 @@ code { font-family: 'DM Mono', monospace !important; font-size: 11px !important;
         background: #111111 !important; border-color: #1f1f1f !important;
     }
     div[data-testid="stVerticalBlockBorderWrapper"] p { color: #d1d5db !important; }
+
+    /* In-card selectbox dark mode */
+    div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="select"] > div {
+        background: transparent !important; border-color: #1f1f1f !important; color: #9ca3af !important;
+    }
 
     /* Card title button in dark mode */
     div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"] {
