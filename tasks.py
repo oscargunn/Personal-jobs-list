@@ -1,7 +1,6 @@
 import streamlit as st
 import json
 import os
-import io
 import random
 import string
 from datetime import datetime, date, time, timedelta
@@ -9,7 +8,6 @@ from datetime import datetime, date, time, timedelta
 try:
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
-    from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
     _GCAL_PKGS = True
 except ImportError:
     _GCAL_PKGS = False
@@ -33,9 +31,8 @@ STATUS_STYLES = {
 
 DEFAULT_TABS = ["Personal", "University", "Home"]
 STORAGE_FILE = "tasks_data.json"
-SCOPES       = ["https://www.googleapis.com/auth/calendar.events"]
-DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
-DRIVE_FNAME  = "tasks_data.json"
+SCOPES        = ["https://www.googleapis.com/auth/calendar.events"]
+SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 # ── Google Calendar helpers ───────────────────────────────────────────────────
 
@@ -231,88 +228,66 @@ def sync_from_calendar() -> int:
         save_data()
     return added
 
-# ── Google Drive persistence ──────────────────────────────────────────────────
+# ── Google Sheets persistence ─────────────────────────────────────────────────
+# Service accounts can read/write Sheets without storage-quota issues.
+# Setup: create a Google Sheet, share it with the service account (Editor),
+# then add  sheets_id = "YOUR_SHEET_ID"  to [gcp_service_account] in secrets.
 
-def _drive_folder_id() -> str:
+def _sheets_id() -> str:
     try:
-        return st.secrets["gcp_service_account"].get("drive_folder_id", "")
+        return st.secrets["gcp_service_account"].get("sheets_id", "")
     except Exception:
         return ""
 
 
-def _get_drive_service():
-    if not _GCAL_PKGS or not has_gcal_secrets() or not _drive_folder_id():
+def _get_sheets_service():
+    if not _GCAL_PKGS or not has_gcal_secrets() or not _sheets_id():
         return None
     try:
         info  = dict(st.secrets["gcp_service_account"])
         creds = service_account.Credentials.from_service_account_info(
-            info, scopes=DRIVE_SCOPES
+            info, scopes=SHEETS_SCOPES
         )
-        return build("drive", "v3", credentials=creds)
+        return build("sheets", "v4", credentials=creds)
     except Exception:
         return None
 
 
-def _get_drive_file_id() -> str | None:
-    """Return the Drive file ID for tasks_data.json, cached in session state.
-    Creates the file in the configured folder if it doesn't exist yet."""
-    if "drive_file_id" in st.session_state:
-        return st.session_state.drive_file_id
-    svc = _get_drive_service()
-    folder_id = _drive_folder_id()
-    if not svc or not folder_id:
-        st.session_state.drive_file_id = None
+def _load_from_sheets() -> dict | None:
+    svc = _get_sheets_service()
+    sid = _sheets_id()
+    if not svc or not sid:
         return None
     try:
-        q       = f"name='{DRIVE_FNAME}' and '{folder_id}' in parents and trashed=false"
-        results = svc.files().list(q=q, fields="files(id)").execute()
-        files   = results.get("files", [])
-        if files:
-            fid = files[0]["id"]
-        else:
-            empty = json.dumps({"jobs": [], "tabs": list(DEFAULT_TABS), "archived_tabs": []})
-            meta  = {"name": DRIVE_FNAME, "parents": [folder_id]}
-            media = MediaIoBaseUpload(io.BytesIO(empty.encode()), mimetype="application/json")
-            fid   = svc.files().create(body=meta, media_body=media, fields="id").execute().get("id")
-        st.session_state.drive_file_id = fid
-        st.session_state.pop("drive_error", None)
-        return fid
+        result = (
+            svc.spreadsheets().values()
+            .get(spreadsheetId=sid, range="A1")
+            .execute()
+        )
+        values = result.get("values", [])
+        if values and values[0] and values[0][0].strip():
+            return json.loads(values[0][0])
+        return {}   # empty sheet = fresh start (not an error)
     except Exception as e:
-        st.session_state.drive_file_id = None
-        st.session_state["drive_error"] = f"Drive setup failed: {e}"
+        st.session_state["storage_error"] = f"Sheets load failed: {e}"
         return None
 
 
-def _load_from_drive() -> dict | None:
-    svc = _get_drive_service()
-    fid = _get_drive_file_id()
-    if not svc or not fid:
-        return None
-    try:
-        req  = svc.files().get_media(fileId=fid)
-        buf  = io.BytesIO()
-        dl   = MediaIoBaseDownload(buf, req)
-        done = False
-        while not done:
-            _, done = dl.next_chunk()
-        buf.seek(0)
-        return json.loads(buf.read().decode())
-    except Exception:
-        return None
-
-
-def _save_to_drive(data: dict):
-    svc = _get_drive_service()
-    fid = _get_drive_file_id()
-    if not svc or not fid:
+def _save_to_sheets(data: dict):
+    svc = _get_sheets_service()
+    sid = _sheets_id()
+    if not svc or not sid:
         return
     try:
-        content = json.dumps(data, indent=2)
-        media   = MediaIoBaseUpload(io.BytesIO(content.encode()), mimetype="application/json")
-        svc.files().update(fileId=fid, media_body=media).execute()
-        st.session_state.pop("drive_error", None)
+        svc.spreadsheets().values().update(
+            spreadsheetId=sid,
+            range="A1",
+            valueInputOption="RAW",
+            body={"values": [[json.dumps(data)]]},
+        ).execute()
+        st.session_state.pop("storage_error", None)
     except Exception as e:
-        st.session_state["drive_error"] = f"Drive save failed: {e}"
+        st.session_state["storage_error"] = f"Sheets save failed: {e}"
 
 
 # ── Data layer ────────────────────────────────────────────────────────────────
@@ -323,21 +298,34 @@ def now_ms() -> float:
 def gen_id() -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
 
+def _migrate(jobs: list, tabs: list, archived_tabs: list) -> tuple:
+    """One-time migrations applied after loading data regardless of source."""
+    # Rename legacy 'Work' tab → 'University'
+    tabs          = ["University" if t == "Work" else t for t in tabs]
+    archived_tabs = ["University" if t == "Work" else t for t in archived_tabs]
+    for j in jobs:
+        if j.get("location") == "Work":
+            j["location"] = "University"
+    return jobs, tabs, archived_tabs
+
+
 def load_data() -> tuple:
     def _parse(d: dict) -> tuple:
         jobs = d.get("jobs", [])
         for j in jobs:
             j.setdefault("calEventId", None)
             j.setdefault("dueTime", "")
-        return jobs, d.get("tabs", list(DEFAULT_TABS)), d.get("archived_tabs", [])
+        tabs          = d.get("tabs", list(DEFAULT_TABS))
+        archived_tabs = d.get("archived_tabs", [])
+        return _migrate(jobs, tabs, archived_tabs)
 
-    # Try Drive first — survives redeploys
-    if _drive_folder_id():
-        d = _load_from_drive()
+    # Try Sheets first — survives redeploys
+    if _sheets_id():
+        d = _load_from_sheets()
         if d is not None:
             return _parse(d)
 
-    # Local file fallback (local dev / no Drive configured)
+    # Local file fallback (local dev / no Sheets configured)
     if os.path.exists(STORAGE_FILE):
         try:
             with open(STORAGE_FILE) as f:
@@ -353,7 +341,7 @@ def save_data():
         "tabs":          st.session_state.tabs_list,
         "archived_tabs": st.session_state.archived_tabs,
     }
-    _save_to_drive(data)                           # persistent across redeploys
+    _save_to_sheets(data)                          # persistent across redeploys
     with open(STORAGE_FILE, "w") as f:             # local cache / dev fallback
         json.dump(data, f, indent=2)
 
@@ -724,8 +712,8 @@ if "gcal_toast" in st.session_state:
     st.toast(st.session_state.pop("gcal_toast"))
 if "gcal_error" in st.session_state:
     st.error(st.session_state.pop("gcal_error"))
-if "drive_error" in st.session_state:
-    st.warning(f"💾 {st.session_state['drive_error']}")
+if "storage_error" in st.session_state:
+    st.warning(f"💾 {st.session_state['storage_error']}")
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
@@ -897,8 +885,8 @@ with hc5:
     elif not has_gcal_secrets():
         st.markdown("<p class='gcal-warn'>⚠ Add secrets</p>", unsafe_allow_html=True)
     elif gcal_connected():
-        drive_ok = _drive_folder_id() and "drive_error" not in st.session_state
-        status   = "📅💾 Connected" if drive_ok else ("📅 Calendar only" if _drive_folder_id() else "📅 Connected")
+        sheets_ok = _sheets_id() and "storage_error" not in st.session_state
+        status    = "📅💾 Connected" if sheets_ok else ("📅 Calendar only" if _sheets_id() else "📅 Connected")
         st.markdown(f"<p class='gcal-status'>{status}</p>", unsafe_allow_html=True)
     else:
         st.markdown("<p class='gcal-warn'>⚠ Invalid creds</p>", unsafe_allow_html=True)
