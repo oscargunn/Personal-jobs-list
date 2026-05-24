@@ -623,26 +623,36 @@ def render_archived_card(job: dict, lk: str):
             st.caption("  ·  ".join(meta))
 
 
-def render_today_tab():
-    today_s = date.today().isoformat()
-    relevant = sorted(
-        [j for j in st.session_state.jobs
-         if j.get("dueDate") and j["dueDate"] <= today_s
-         and j["status"] not in ("Completed", "Archived")],
-        key=lambda x: x["dueDate"],
-    )
+def _local_today() -> date:
+    """Return today's date in the user's configured timezone.
+    Streamlit Cloud runs on UTC — without this, Auckland users see yesterday."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(_timezone())).date()
+    except Exception:
+        return date.today()
 
-    if not relevant:
+
+def render_today_tab():
+    today_d    = _local_today()
+    today_s    = today_d.isoformat()
+    tomorrow_s = (today_d + timedelta(days=1)).isoformat()
+
+    active = [j for j in st.session_state.jobs if j["status"] not in ("Completed", "Archived")]
+
+    overdue      = sorted([j for j in active if j.get("dueDate") and j["dueDate"] < today_s],
+                          key=lambda x: x["dueDate"])
+    due_today    = [j for j in active if j.get("dueDate") and j["dueDate"] == today_s]
+    due_tomorrow = [j for j in active if j.get("dueDate") and j["dueDate"] == tomorrow_s]
+
+    if not overdue and not due_today and not due_tomorrow:
         st.markdown("""
         <div style='text-align:center;padding:80px 0;'>
             <div style='font-size:38px;margin-bottom:10px;'>✓</div>
             <div style='font-size:16px;font-weight:600;margin-bottom:6px;'>You're all caught up</div>
-            <div style='font-size:13px;color:#94a3b8;'>Nothing due today or overdue</div>
+            <div style='font-size:13px;color:#94a3b8;'>Nothing overdue, due today, or due tomorrow</div>
         </div>""", unsafe_allow_html=True)
         return
-
-    overdue   = [j for j in relevant if j["dueDate"] < today_s]
-    due_today = [j for j in relevant if j["dueDate"] == today_s]
 
     if overdue:
         st.markdown(f"#### ⚠ Overdue &nbsp; `{len(overdue)}`")
@@ -650,15 +660,24 @@ def render_today_tab():
         for idx, job in enumerate(overdue):
             with cols[idx % 3]:
                 render_active_card(job, "ov")
-        if due_today:
+        if due_today or due_tomorrow:
             st.markdown("---")
 
     if due_today:
-        st.markdown(f"#### Due Today &nbsp; `{len(due_today)}`")
+        st.markdown(f"#### Today &nbsp; `{len(due_today)}`")
         cols = st.columns(3)
         for idx, job in enumerate(due_today):
             with cols[idx % 3]:
                 render_active_card(job, "dt")
+        if due_tomorrow:
+            st.markdown("---")
+
+    if due_tomorrow:
+        st.markdown(f"#### Tomorrow &nbsp; `{len(due_tomorrow)}`")
+        cols = st.columns(3)
+        for idx, job in enumerate(due_tomorrow):
+            with cols[idx % 3]:
+                render_active_card(job, "tm")
 
 
 def render_kanban(location: str, view: str, filter_priority: str, filter_status: str):
@@ -954,10 +973,12 @@ st.markdown("---")
 
 # ── Location tabs ─────────────────────────────────────────────────────────────
 
-_today_s     = date.today().isoformat()
+_today_d     = _local_today()
+_today_s     = _today_d.isoformat()
+_tomorrow_s  = (_today_d + timedelta(days=1)).isoformat()
 _today_count = sum(
     1 for j in st.session_state.jobs
-    if j.get("dueDate") and j["dueDate"] <= _today_s
+    if j.get("dueDate") and j["dueDate"] <= _tomorrow_s
     and j["status"] not in ("Completed", "Archived")
 )
 tab_labels = [f"Today  ({_today_count})" if _today_count else "Today"]
