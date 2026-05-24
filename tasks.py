@@ -530,8 +530,10 @@ def task_dialog():
 # ── Card helpers ──────────────────────────────────────────────────────────────
 
 def badge(text: str, style: dict) -> str:
+    slug = text.lower().replace(" ", "-")
     return (
-        f'<span style="background:{style["bg"]};color:{style["color"]};'
+        f'<span class="task-badge" data-badge="{slug}" '
+        f'style="background:{style["bg"]};color:{style["color"]};'
         f'padding:2px 10px;border-radius:4px;font-size:11px;font-weight:600;'
         f'letter-spacing:0.03em;display:inline-block;margin:2px;">{text.upper()}</span>'
     )
@@ -857,6 +859,16 @@ code { font-family: 'DM Mono', monospace !important; font-size: 11px !important;
     /* Calendar status */
     .gcal-status { color: #34d399 !important; }
     .gcal-warn   { color: #9ca3af !important; }
+
+    /* ── Badges — override inline styles for dark mode ── */
+    span.task-badge[data-badge="low"]         { background: #1e3a5f !important; color: #93c5fd !important; }
+    span.task-badge[data-badge="medium"]      { background: #431407 !important; color: #fdba74 !important; }
+    span.task-badge[data-badge="high"]        { background: #2e1065 !important; color: #d8b4fe !important; }
+    span.task-badge[data-badge="urgent"]      { background: #450a0a !important; color: #fca5a5 !important; }
+    span.task-badge[data-badge="pending"]     { background: #4a0d2e !important; color: #f9a8d4 !important; }
+    span.task-badge[data-badge="in-progress"] { background: #431407 !important; color: #fdba74 !important; }
+    span.task-badge[data-badge="completed"]   { background: #052e16 !important; color: #86efac !important; }
+    span.task-badge[data-badge="archived"]    { background: #1e293b !important; color: #94a3b8 !important; }
 }
 </style>
 """, unsafe_allow_html=True)
