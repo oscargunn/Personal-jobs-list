@@ -550,6 +550,13 @@ def badge(text: str, style: dict) -> str:
     )
 
 
+def _on_status_change(job_id: str, widget_key: str):
+    """on_change callback — fires before the rerun so the column re-groups correctly."""
+    new_status = st.session_state.get(widget_key)
+    if new_status:
+        set_status(job_id, new_status)
+
+
 def render_active_card(job: dict, lk: str):
     today_s = date.today().isoformat()
     is_over = (
@@ -580,13 +587,12 @@ def render_active_card(job: dict, lk: str):
                 st.rerun()
 
         # ── Status dropdown ─────────────────────────────────────────────────
-        opts = ["Pending", "In Progress", "Completed"]
-        cur  = opts.index(job["status"]) if job["status"] in opts else 0
-        sel  = st.selectbox("Status", opts, index=cur,
-                            key=f"s_{lk}_{job['id']}", label_visibility="collapsed")
-        if sel != job["status"]:
-            set_status(job["id"], sel)
-            st.rerun()
+        opts   = ["Pending", "In Progress", "Completed"]
+        cur    = opts.index(job["status"]) if job["status"] in opts else 0
+        _key   = f"s_{lk}_{job['id']}"
+        st.selectbox("Status", opts, index=cur, key=_key,
+                     label_visibility="collapsed",
+                     on_change=_on_status_change, args=(job["id"], _key))
 
         # ── Due date line ───────────────────────────────────────────────────
         meta = []
