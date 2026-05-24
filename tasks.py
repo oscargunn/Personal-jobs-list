@@ -180,17 +180,28 @@ def sync_from_calendar() -> int:
     added = 0
 
     for cal_id, tab_name in cal_map.items():
+        # Paginate through all results — don't stop at 200
+        page_token = None
+        events = []
         try:
-            result = svc.events().list(
-                calendarId=cal_id,
-                timeMin=past, timeMax=future,
-                maxResults=200, singleEvents=True, orderBy="startTime",
-            ).execute()
+            while True:
+                kwargs = dict(
+                    calendarId=cal_id,
+                    timeMin=past, timeMax=future,
+                    maxResults=500, singleEvents=True, orderBy="startTime",
+                )
+                if page_token:
+                    kwargs["pageToken"] = page_token
+                result     = svc.events().list(**kwargs).execute()
+                events    += result.get("items", [])
+                page_token = result.get("nextPageToken")
+                if not page_token:
+                    break
         except Exception as e:
             st.session_state["gcal_error"] = f"Could not read calendar '{tab_name}': {e}"
             continue
 
-        for ev in result.get("items", []):
+        for ev in events:
             if ev["id"] in existing_ids:
                 continue
             if ev.get("recurringEventId"):          # skip auto-rolling events
@@ -634,9 +645,10 @@ def _local_today() -> date:
 
 
 def render_today_tab():
-    today_d    = _local_today()
-    today_s    = today_d.isoformat()
-    tomorrow_s = (today_d + timedelta(days=1)).isoformat()
+    today_d      = _local_today()
+    today_s      = today_d.isoformat()
+    tomorrow_s   = (today_d + timedelta(days=1)).isoformat()
+    month_end_s  = (today_d + timedelta(days=30)).isoformat()
 
     active = [j for j in st.session_state.jobs if j["status"] not in ("Completed", "Archived")]
 
@@ -644,40 +656,47 @@ def render_today_tab():
                           key=lambda x: x["dueDate"])
     due_today    = [j for j in active if j.get("dueDate") and j["dueDate"] == today_s]
     due_tomorrow = [j for j in active if j.get("dueDate") and j["dueDate"] == tomorrow_s]
+    coming_up    = sorted(
+        [j for j in active if j.get("dueDate") and tomorrow_s < j["dueDate"] <= month_end_s],
+        key=lambda x: x["dueDate"],
+    )
 
-    if not overdue and not due_today and not due_tomorrow:
+    if not overdue and not due_today and not due_tomorrow and not coming_up:
         st.markdown("""
         <div style='text-align:center;padding:80px 0;'>
             <div style='font-size:38px;margin-bottom:10px;'>✓</div>
             <div style='font-size:16px;font-weight:600;margin-bottom:6px;'>You're all caught up</div>
-            <div style='font-size:13px;color:#94a3b8;'>Nothing overdue, due today, or due tomorrow</div>
+            <div style='font-size:13px;color:#94a3b8;'>Nothing due in the next 30 days</div>
         </div>""", unsafe_allow_html=True)
         return
 
+    def _cards(jobs, lk):
+        cols = st.columns(3)
+        for idx, job in enumerate(jobs):
+            with cols[idx % 3]:
+                render_active_card(job, lk)
+
     if overdue:
         st.markdown(f"#### ⚠ Overdue &nbsp; `{len(overdue)}`")
-        cols = st.columns(3)
-        for idx, job in enumerate(overdue):
-            with cols[idx % 3]:
-                render_active_card(job, "ov")
-        if due_today or due_tomorrow:
+        _cards(overdue, "ov")
+        if due_today or due_tomorrow or coming_up:
             st.markdown("---")
 
     if due_today:
         st.markdown(f"#### Today &nbsp; `{len(due_today)}`")
-        cols = st.columns(3)
-        for idx, job in enumerate(due_today):
-            with cols[idx % 3]:
-                render_active_card(job, "dt")
-        if due_tomorrow:
+        _cards(due_today, "dt")
+        if due_tomorrow or coming_up:
             st.markdown("---")
 
     if due_tomorrow:
         st.markdown(f"#### Tomorrow &nbsp; `{len(due_tomorrow)}`")
-        cols = st.columns(3)
-        for idx, job in enumerate(due_tomorrow):
-            with cols[idx % 3]:
-                render_active_card(job, "tm")
+        _cards(due_tomorrow, "tm")
+        if coming_up:
+            st.markdown("---")
+
+    if coming_up:
+        st.markdown(f"#### Coming Up &nbsp; `{len(coming_up)}`")
+        _cards(coming_up, "cu")
 
 
 def render_kanban(location: str, view: str, filter_priority: str, filter_status: str):
@@ -973,12 +992,12 @@ st.markdown("---")
 
 # ── Location tabs ─────────────────────────────────────────────────────────────
 
-_today_d     = _local_today()
-_today_s     = _today_d.isoformat()
-_tomorrow_s  = (_today_d + timedelta(days=1)).isoformat()
-_today_count = sum(
+_today_d      = _local_today()
+_today_s      = _today_d.isoformat()
+_month_end_s  = (_today_d + timedelta(days=30)).isoformat()
+_today_count  = sum(
     1 for j in st.session_state.jobs
-    if j.get("dueDate") and j["dueDate"] <= _tomorrow_s
+    if j.get("dueDate") and j["dueDate"] <= _month_end_s
     and j["status"] not in ("Completed", "Archived")
 )
 tab_labels = [f"Today  ({_today_count})" if _today_count else "Today"]
