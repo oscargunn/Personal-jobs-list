@@ -582,7 +582,7 @@ def _on_status_change(job_id: str, widget_key: str):
 
 
 def render_active_card(job: dict, lk: str):
-    today_s = date.today().isoformat()
+    today_s = _local_today().isoformat()
     is_over = (
         bool(job.get("dueDate"))
         and job["dueDate"] < today_s
@@ -590,6 +590,10 @@ def render_active_card(job: dict, lk: str):
     )
 
     with st.container(border=True):
+        # Hidden marker so CSS :has() can target overdue cards
+        if is_over:
+            st.markdown('<span class="overdue-marker" style="display:none;height:0;margin:0;padding:0;"></span>', unsafe_allow_html=True)
+
         # ── Title (click to edit) ───────────────────────────────────────────
         if st.button(job["title"], key=f"edit_{lk}_{job['id']}",
                      use_container_width=True, type="primary"):
@@ -850,6 +854,13 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 div[data-testid="stVerticalBlockBorderWrapper"] > div { padding: 10px 12px !important; }
 div[data-testid="stVerticalBlockBorderWrapper"] p { margin: 0 !important; line-height: 1.4 !important; }
 
+/* ── Overdue card highlight ──────────────────────────────────────────────── */
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.overdue-marker) {
+    border-color: #ef4444 !important;
+    border-left: 3px solid #ef4444 !important;
+    background: rgba(254, 242, 242, 0.55) !important;
+}
+
 /* ── Global buttons ──────────────────────────────────────────────────────── */
 .stButton button {
     font-family: 'Inter', sans-serif !important; font-size: 12px !important;
@@ -948,6 +959,13 @@ div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox { margin: 4px 0 2px
         background: #111111 !important; border-color: #1f1f1f !important;
     }
     div[data-testid="stVerticalBlockBorderWrapper"] p { color: #d1d5db !important; }
+
+    /* Overdue card highlight – dark mode */
+    div[data-testid="stVerticalBlockBorderWrapper"]:has(.overdue-marker) {
+        border-color: #b91c1c !important;
+        border-left: 3px solid #b91c1c !important;
+        background: rgba(127, 29, 29, 0.22) !important;
+    }
 
     /* In-card selectbox dark mode */
     div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="select"] > div {
