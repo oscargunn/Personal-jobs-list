@@ -31,10 +31,10 @@ STATUS_STYLES = {
     "Archived":    {"bg": "#f8fafc", "color": "#94a3b8", "dot": "#cbd5e1"},
 }
 
-DEFAULT_TABS = ["Personal", "Work", "Home"]
+DEFAULT_TABS = ["Personal", "University", "Home"]
 STORAGE_FILE = "tasks_data.json"
 SCOPES       = ["https://www.googleapis.com/auth/calendar.events"]
-DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 DRIVE_FNAME  = "tasks_data.json"
 
 # ── Google Calendar helpers ───────────────────────────────────────────────────
@@ -119,12 +119,22 @@ def _event_body(job: dict) -> dict:
     }
 
 
+def _calendar_id_for_tab(tab_name: str) -> str:
+    """Return the calendar ID to use when writing events for a given tab.
+    Looks up the reverse of calendar_map; falls back to the primary calendar_id."""
+    for cal_id, name in _calendar_map().items():
+        if name == tab_name:
+            return cal_id
+    return _calendar_id()
+
+
 def create_gcal_event(job: dict) -> str | None:
     svc = _get_service()
     if not svc or not job.get("dueDate"):
         return None
+    cal_id = _calendar_id_for_tab(job.get("location", ""))
     try:
-        result = svc.events().insert(calendarId=_calendar_id(), body=_event_body(job)).execute()
+        result = svc.events().insert(calendarId=cal_id, body=_event_body(job)).execute()
         return result.get("id")
     except Exception as e:
         st.session_state["gcal_error"] = f"Calendar error: {e}"
@@ -135,18 +145,20 @@ def update_gcal_event(event_id: str, job: dict):
     svc = _get_service()
     if not svc or not event_id:
         return
+    cal_id = _calendar_id_for_tab(job.get("location", ""))
     try:
-        svc.events().update(calendarId=_calendar_id(), eventId=event_id, body=_event_body(job)).execute()
+        svc.events().update(calendarId=cal_id, eventId=event_id, body=_event_body(job)).execute()
     except Exception as e:
         st.session_state["gcal_error"] = f"Calendar update failed: {e}"
 
 
-def delete_gcal_event(event_id: str):
+def delete_gcal_event(event_id: str, tab_name: str = ""):
     svc = _get_service()
     if not svc or not event_id:
         return
+    cal_id = _calendar_id_for_tab(tab_name) if tab_name else _calendar_id()
     try:
-        svc.events().delete(calendarId=_calendar_id(), eventId=event_id).execute()
+        svc.events().delete(calendarId=cal_id, eventId=event_id).execute()
     except Exception:
         pass
 
@@ -263,9 +275,11 @@ def _get_drive_file_id() -> str | None:
             media = MediaIoBaseUpload(io.BytesIO(empty.encode()), mimetype="application/json")
             fid   = svc.files().create(body=meta, media_body=media, fields="id").execute().get("id")
         st.session_state.drive_file_id = fid
+        st.session_state.pop("drive_error", None)
         return fid
-    except Exception:
+    except Exception as e:
         st.session_state.drive_file_id = None
+        st.session_state["drive_error"] = f"Drive setup failed: {e}"
         return None
 
 
@@ -296,8 +310,9 @@ def _save_to_drive(data: dict):
         content = json.dumps(data, indent=2)
         media   = MediaIoBaseUpload(io.BytesIO(content.encode()), mimetype="application/json")
         svc.files().update(fileId=fid, media_body=media).execute()
-    except Exception:
-        pass
+        st.session_state.pop("drive_error", None)
+    except Exception as e:
+        st.session_state["drive_error"] = f"Drive save failed: {e}"
 
 
 # ── Data layer ────────────────────────────────────────────────────────────────
@@ -368,7 +383,7 @@ def set_status(job_id: str, status: str):
 def remove_job(job_id: str):
     job = next((j for j in st.session_state.jobs if j["id"] == job_id), None)
     if job and job.get("calEventId"):
-        delete_gcal_event(job["calEventId"])
+        delete_gcal_event(job["calEventId"], job.get("location", ""))
     st.session_state.jobs = [j for j in st.session_state.jobs if j["id"] != job_id]
     save_data()
 
@@ -709,6 +724,8 @@ if "gcal_toast" in st.session_state:
     st.toast(st.session_state.pop("gcal_toast"))
 if "gcal_error" in st.session_state:
     st.error(st.session_state.pop("gcal_error"))
+if "drive_error" in st.session_state:
+    st.warning(f"💾 {st.session_state['drive_error']}")
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
@@ -880,7 +897,9 @@ with hc5:
     elif not has_gcal_secrets():
         st.markdown("<p class='gcal-warn'>⚠ Add secrets</p>", unsafe_allow_html=True)
     elif gcal_connected():
-        st.markdown("<p class='gcal-status'>📅 Connected</p>", unsafe_allow_html=True)
+        drive_ok = _drive_folder_id() and "drive_error" not in st.session_state
+        status   = "📅💾 Connected" if drive_ok else ("📅 Calendar only" if _drive_folder_id() else "📅 Connected")
+        st.markdown(f"<p class='gcal-status'>{status}</p>", unsafe_allow_html=True)
     else:
         st.markdown("<p class='gcal-warn'>⚠ Invalid creds</p>", unsafe_allow_html=True)
 with hc6:
