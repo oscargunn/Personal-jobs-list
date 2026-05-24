@@ -30,9 +30,12 @@ STATUS_STYLES = {
 }
 
 DEFAULT_TABS = ["Personal", "University", "Home"]
-STORAGE_FILE = "tasks_data.json"
-SCOPES        = ["https://www.googleapis.com/auth/calendar.events"]
-SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+STORAGE_FILE   = "tasks_data.json"
+SCOPES         = ["https://www.googleapis.com/auth/calendar.events"]
+SHEETS_SCOPES  = ["https://www.googleapis.com/auth/spreadsheets"]
+
+PRIORITY_RANK  = {"Low": 1, "Medium": 2, "High": 3, "Urgent": 4}
+PRIORITY_NAME  = {1: "Low", 2: "Medium", 3: "High", 4: "Urgent"}
 
 # ── Google Calendar helpers ───────────────────────────────────────────────────
 
@@ -550,6 +553,27 @@ def badge(text: str, style: dict) -> str:
     )
 
 
+def _eff_rank(job: dict) -> int:
+    """Effective priority rank (1–4), auto-escalated as the deadline approaches.
+    Never permanently modifies the stored priority."""
+    base = PRIORITY_RANK.get(job.get("priority", "Medium"), 2)
+    due_s = job.get("dueDate", "")
+    if not due_s or job.get("status") in ("Completed", "Archived"):
+        return base
+    try:
+        days = (date.fromisoformat(due_s) - _local_today()).days
+        if days <= 0:   return 4              # overdue  → Urgent
+        if days <= 2:   return max(base, 3)   # ≤2 days  → at least High
+        if days <= 7:   return max(base, 2)   # ≤7 days  → at least Medium
+    except Exception:
+        pass
+    return base
+
+
+def _eff_priority(job: dict) -> str:
+    return PRIORITY_NAME.get(_eff_rank(job), job.get("priority", "Medium"))
+
+
 def _on_status_change(job_id: str, widget_key: str):
     """on_change callback — fires before the rerun so the column re-groups correctly."""
     new_status = st.session_state.get(widget_key)
@@ -574,11 +598,15 @@ def render_active_card(job: dict, lk: str):
             st.rerun()
 
         # ── Badges + trash ──────────────────────────────────────────────────
+        eff_pri      = _eff_priority(job)
+        is_escalated = eff_pri != job.get("priority") and job["status"] not in ("Completed", "Archived")
+        escalate_tag = ' <span title="Priority auto-escalated by deadline" style="font-size:10px;">⏰</span>' if is_escalated else ""
+
         bc, dc = st.columns([6, 1])
         with bc:
             st.markdown(
-                badge(job["priority"], PRIORITY_STYLES[job["priority"]]) + " " +
-                badge(job["status"],   STATUS_STYLES[job["status"]]),
+                badge(eff_pri, PRIORITY_STYLES[eff_pri]) + escalate_tag + " " +
+                badge(job["status"], STATUS_STYLES[job["status"]]),
                 unsafe_allow_html=True,
             )
         with dc:
@@ -686,8 +714,9 @@ def render_today_tab():
         return
 
     def _cards(jobs, lk):
+        ordered = sorted(jobs, key=lambda x: (-_eff_rank(x), x.get("dueDate", "9999-99-99")))
         cols = st.columns(3)
-        for idx, job in enumerate(jobs):
+        for idx, job in enumerate(ordered):
             with cols[idx % 3]:
                 render_active_card(job, lk)
 
@@ -729,7 +758,11 @@ def render_kanban(location: str, view: str, filter_priority: str, filter_status:
         pool = [j for j in tab_jobs if j["status"] != "Archived" and matches(j)]
         cols = st.columns(3)
         for i, col_name in enumerate(["Pending", "In Progress", "Completed"]):
-            group = [j for j in pool if j["status"] == col_name]
+            # Sort: highest effective priority first, then soonest due date
+            group = sorted(
+                [j for j in pool if j["status"] == col_name],
+                key=lambda x: (-_eff_rank(x), x.get("dueDate", "9999-99-99")),
+            )
             with cols[i]:
                 st.markdown(f"#### {col_name} &nbsp; `{len(group)}`")
                 if not group:
