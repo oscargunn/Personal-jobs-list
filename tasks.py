@@ -539,99 +539,65 @@ def badge(text: str, style: dict) -> str:
     )
 
 
-PREVIEW_LEN = 90   # chars shown in collapsed notes before truncation
-
 def render_active_card(job: dict, lk: str):
-    expanded_cards = st.session_state.setdefault("expanded_cards", set())
-    is_expanded    = job["id"] in expanded_cards
-
-    notes       = job.get("notes", "")
-    description = job.get("description", "")
-    has_overflow = len(notes) > PREVIEW_LEN or bool(description)
+    today_s = date.today().isoformat()
+    is_over = (
+        bool(job.get("dueDate"))
+        and job["dueDate"] < today_s
+        and job["status"] not in ("Completed", "Archived")
+    )
 
     with st.container(border=True):
-        tc, ec, dc = st.columns([5, 1, 1])
-        with tc:
+        # ── Title (click to edit) ───────────────────────────────────────────
+        if st.button(job["title"], key=f"edit_{lk}_{job['id']}",
+                     use_container_width=True, type="primary"):
+            st.session_state.dlg_job_id = job["id"]
+            st.session_state.dlg_open   = True
+            st.rerun()
+
+        # ── Badges + trash ──────────────────────────────────────────────────
+        bc, dc = st.columns([6, 1])
+        with bc:
             st.markdown(
-                f"<p style='margin:0;font-size:13px;font-weight:600;line-height:1.3;"
-                f"color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-                f"max-width:100%;'>{job['title']}</p>",
+                badge(job["priority"], PRIORITY_STYLES[job["priority"]]) + " " +
+                badge(job["status"],   STATUS_STYLES[job["status"]]),
                 unsafe_allow_html=True,
             )
-        with ec:
-            if st.button("✏", key=f"e_{lk}_{job['id']}", help="Edit", use_container_width=True):
-                st.session_state.dlg_job_id = job["id"]
-                st.session_state.dlg_open   = True
-                st.rerun()
         with dc:
-            if st.button("🗑", key=f"d_{lk}_{job['id']}", help="Delete", use_container_width=True):
+            if st.button("🗑", key=f"del_{lk}_{job['id']}", use_container_width=True):
                 remove_job(job["id"])
                 st.rerun()
 
-        # ── Meta line (always visible) ──────────────────────────────────────
+        # ── Due date line ───────────────────────────────────────────────────
         meta = []
         if job.get("dueDate"):
-            cal_badge  = " 📅" if job.get("calEventId") else ""
+            cal_icon   = " 📅" if job.get("calEventId") else ""
             time_label = f" {job['dueTime']}" if job.get("dueTime") else ""
-            meta.append(f"Due {job['dueDate']}{time_label}{cal_badge}")
+            overdue_tag = "  · OVERDUE" if is_over else ""
+            meta.append(f"Due {job['dueDate']}{time_label}{cal_icon}{overdue_tag}")
         if job["status"] == "Completed" and job.get("completedAt"):
             ms_left = job["completedAt"] + 48 * 3_600_000 - now_ms()
             if ms_left > 0:
                 h = int(ms_left / 3_600_000)
                 m = int((ms_left % 3_600_000) / 60_000)
                 meta.append(f"Archives in {h}h {m}m")
-
-        meta_html = (
-            f"<p style='font-size:11px;color:#94a3b8;margin:1px 0 0;'>{'  ·  '.join(meta)}</p>"
-            if meta else ""
-        )
-
-        # ── Notes / description (collapsed = preview only) ──────────────────
-        if is_expanded:
-            notes_html = (
-                f"<p style='font-size:11px;color:#374151;margin:2px 0 0;'>{notes}</p>"
-                if notes else ""
+        if meta:
+            col = "#ef4444" if is_over else "#6b7280"
+            st.markdown(
+                f"<p style='font-size:11px;color:{col};margin:4px 0 0;'>{'  ·  '.join(meta)}</p>",
+                unsafe_allow_html=True,
             )
-            desc_html = (
-                f"<p style='font-size:11px;color:#374151;margin:2px 0 0;'>{description}</p>"
-                if description else ""
-            )
-        else:
-            preview    = (notes[:PREVIEW_LEN].rstrip() + "…") if len(notes) > PREVIEW_LEN else notes
-            notes_html = (
-                f"<p style='font-size:11px;color:#374151;margin:2px 0 0;'>{preview}</p>"
-                if notes else ""
-            )
-            desc_html  = ""   # hidden until expanded
 
-        st.markdown(
-            badge(job["priority"], PRIORITY_STYLES[job["priority"]]) + " " +
-            badge(job["status"],   STATUS_STYLES[job["status"]]) +
-            meta_html + notes_html + desc_html,
-            unsafe_allow_html=True,
-        )
-
-        # ── Expand / collapse toggle ────────────────────────────────────────
-        if has_overflow:
-            toggle_label = "▲ less" if is_expanded else "▼ more"
-            if st.button(toggle_label, key=f"exp_{lk}_{job['id']}", use_container_width=False):
-                if is_expanded:
-                    expanded_cards.discard(job["id"])
-                else:
-                    expanded_cards.add(job["id"])
-                st.rerun()
-
-        # ── Status selector ─────────────────────────────────────────────────
-        if job["status"] != "Completed":
-            opts = ["Pending", "In Progress", "Completed"]
-            cur  = opts.index(job["status"]) if job["status"] in opts else 0
-            sel  = st.selectbox(
-                "Status", opts, index=cur,
-                key=f"s_{lk}_{job['id']}", label_visibility="collapsed",
+        # ── Notes (always clipped, no toggle) ──────────────────────────────
+        notes = job.get("notes", "") or job.get("description", "")
+        if notes:
+            clipped = (notes[:100].rstrip() + "…") if len(notes) > 100 else notes
+            st.markdown(
+                f"<p style='font-size:11px;color:#6b7280;margin:2px 0 4px;"
+                f"overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;"
+                f"-webkit-box-orient:vertical;'>{clipped}</p>",
+                unsafe_allow_html=True,
             )
-            if sel != job["status"]:
-                set_status(job["id"], sel)
-                st.rerun()
 
 
 def render_archived_card(job: dict, lk: str):
@@ -657,13 +623,49 @@ def render_archived_card(job: dict, lk: str):
             st.caption("  ·  ".join(meta))
 
 
-def render_kanban(location: str, view: str, search: str, filter_priority: str, filter_status: str):
+def render_today_tab():
+    today_s = date.today().isoformat()
+    relevant = sorted(
+        [j for j in st.session_state.jobs
+         if j.get("dueDate") and j["dueDate"] <= today_s
+         and j["status"] not in ("Completed", "Archived")],
+        key=lambda x: x["dueDate"],
+    )
+
+    if not relevant:
+        st.markdown("""
+        <div style='text-align:center;padding:80px 0;'>
+            <div style='font-size:38px;margin-bottom:10px;'>✓</div>
+            <div style='font-size:16px;font-weight:600;margin-bottom:6px;'>You're all caught up</div>
+            <div style='font-size:13px;color:#94a3b8;'>Nothing due today or overdue</div>
+        </div>""", unsafe_allow_html=True)
+        return
+
+    overdue   = [j for j in relevant if j["dueDate"] < today_s]
+    due_today = [j for j in relevant if j["dueDate"] == today_s]
+
+    if overdue:
+        st.markdown(f"#### ⚠ Overdue &nbsp; `{len(overdue)}`")
+        cols = st.columns(3)
+        for idx, job in enumerate(overdue):
+            with cols[idx % 3]:
+                render_active_card(job, "ov")
+        if due_today:
+            st.markdown("---")
+
+    if due_today:
+        st.markdown(f"#### Due Today &nbsp; `{len(due_today)}`")
+        cols = st.columns(3)
+        for idx, job in enumerate(due_today):
+            with cols[idx % 3]:
+                render_active_card(job, "dt")
+
+
+def render_kanban(location: str, view: str, filter_priority: str, filter_status: str):
     lk = location.replace(" ", "_").lower()
-    q  = search.strip().lower()
 
     def matches(j):
         return (
-            (not q or q in j["title"].lower() or q in (j.get("notes") or "").lower()) and
             (filter_priority == "All" or j["priority"] == filter_priority) and
             (filter_status   == "All" or j["status"]   == filter_status)
         )
@@ -721,146 +723,190 @@ if "storage_error" in st.session_state:
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
-html, body, [class*="css"] { font-family: 'DM Sans', sans-serif !important; }
-.block-container { padding-top: 5rem !important; max-width: 1400px !important; }
+/* ── Base ───────────────────────────────────────────────────────────────── */
+html, body, [class*="css"] { font-family: 'Inter', sans-serif !important; }
+.block-container { padding-top: 1.5rem !important; padding-bottom: 2rem !important; max-width: 1440px !important; }
 #MainMenu, footer, header { visibility: hidden; }
 
-.app-header { display: flex; align-items: center; gap: 12px; margin-bottom: 0; }
-.app-title  { font-family: 'DM Sans', sans-serif; font-size: 20px; font-weight: 600; color: #0f172a; letter-spacing: -0.02em; margin: 0; }
-.app-subtitle { font-size: 13px; color: #94a3b8; font-weight: 400; }
+/* ── App header ─────────────────────────────────────────────────────────── */
+.app-title    { font-size: 15px; font-weight: 600; color: #111827; letter-spacing: -0.02em; margin: 0; }
+.app-subtitle { font-size: 11px; color: #9ca3af; font-weight: 400; margin-top: 1px; }
+.gcal-status  { font-size: 11px; font-weight: 500; color: #16a34a; margin: 6px 0 0; }
+.gcal-warn    { font-size: 11px; color: #9ca3af; margin: 6px 0 0; }
 
-hr { border-color: #e2e8f0 !important; margin: 0.75rem 0 !important; }
+/* ── Dividers ────────────────────────────────────────────────────────────── */
+hr { border: none !important; border-top: 1px solid #f3f4f6 !important; margin: 0.5rem 0 !important; }
 
-.stTabs [data-baseweb="tab-list"] { gap: 0; border-bottom: 1px solid #e2e8f0; background: transparent; }
-.stTabs [data-baseweb="tab"] {
-    font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; font-weight: 500 !important;
-    color: #64748b !important; padding: 10px 18px !important; border-radius: 0 !important;
-    border-bottom: 2px solid transparent !important;
+/* ── Tabs ────────────────────────────────────────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0; border-bottom: 1px solid #e5e7eb; background: transparent;
 }
-.stTabs [aria-selected="true"] { color: #0f172a !important; border-bottom: 2px solid #0f172a !important; background: transparent !important; }
+.stTabs [data-baseweb="tab"] {
+    font-family: 'Inter', sans-serif !important; font-size: 12px !important;
+    font-weight: 500 !important; color: #9ca3af !important;
+    padding: 8px 16px !important; border-radius: 0 !important;
+    border-bottom: 2px solid transparent !important; letter-spacing: 0 !important;
+}
+.stTabs [aria-selected="true"] {
+    color: #111827 !important; border-bottom: 2px solid #111827 !important;
+    background: transparent !important;
+}
 .stTabs [data-baseweb="tab-highlight"] { display: none !important; }
 .stTabs [data-baseweb="tab-border"]    { display: none !important; }
 
+/* ── Cards ───────────────────────────────────────────────────────────────── */
 div[data-testid="stVerticalBlockBorderWrapper"] {
-    border-radius: 2px !important; border-color: #e2e8f0 !important;
-    padding: 0px !important; margin-bottom: 4px !important;
+    border-radius: 8px !important; border: 1px solid #e5e7eb !important;
+    background: #ffffff !important; padding: 0 !important; margin-bottom: 6px !important;
 }
-div[data-testid="stVerticalBlockBorderWrapper"] > div { padding: 4px 8px !important; }
-div[data-testid="stVerticalBlockBorderWrapper"] p { margin: 0 !important; line-height: 1.3 !important; }
-div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox > div { min-height: 28px !important; }
-div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="select"] > div {
-    padding-top: 2px !important; padding-bottom: 2px !important; min-height: 28px !important; font-size: 11px !important;
+div[data-testid="stVerticalBlockBorderWrapper"] > div { padding: 10px 12px !important; }
+div[data-testid="stVerticalBlockBorderWrapper"] p { margin: 0 !important; line-height: 1.4 !important; }
+
+/* ── Card title button (primary inside a card) ───────────────────────────── */
+div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"] {
+    background: #f3f4f6 !important; color: #111827 !important;
+    border: none !important; border-radius: 6px !important;
+    text-align: center !important; font-size: 13px !important; font-weight: 600 !important;
+    min-height: 44px !important; height: auto !important;
+    padding: 10px 14px !important; white-space: normal !important;
+    word-break: break-word !important; line-height: 1.4 !important;
+    letter-spacing: -0.01em !important; width: 100% !important;
+    box-shadow: none !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"]:hover {
+    background: #e5e7eb !important; color: #111827 !important;
 }
 
+/* ── Card delete button (secondary inside a card) ────────────────────────── */
+div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"] {
+    background: transparent !important; border: none !important;
+    color: #d1d5db !important; font-size: 14px !important;
+    padding: 2px 4px !important; height: 26px !important; min-height: 26px !important;
+    box-shadow: none !important; filter: none !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"]:hover {
+    color: #ef4444 !important; background: transparent !important;
+}
+
+/* ── Global buttons ──────────────────────────────────────────────────────── */
 .stButton button {
-    font-family: 'DM Sans', sans-serif !important; font-size: 12px !important; font-weight: 500 !important;
-    border-radius: 3px !important; letter-spacing: 0.01em !important;
-    padding: 2px 6px !important; height: 28px !important; min-height: 28px !important;
+    font-family: 'Inter', sans-serif !important; font-size: 12px !important;
+    font-weight: 500 !important; border-radius: 6px !important;
+    letter-spacing: 0 !important; height: 30px !important; min-height: 30px !important;
+    padding: 0 12px !important;
 }
-.stButton button[kind="primary"]          { background: #0f172a !important; border: none !important; color: white !important; }
-.stButton button[kind="primary"]:hover    { background: #1e293b !important; }
-.stButton button[kind="secondary"]        { background: #f8fafc !important; border: 1px solid #e2e8f0 !important; color: #64748b !important; filter: grayscale(100%) !important; }
-.stButton button[kind="secondary"]:hover  { background: #f1f5f9 !important; color: #374151 !important; }
+.stButton button[kind="primary"]         { background: #111827 !important; border: none !important; color: #ffffff !important; }
+.stButton button[kind="primary"]:hover   { background: #1f2937 !important; }
+.stButton button[kind="secondary"]       { background: #ffffff !important; border: 1px solid #e5e7eb !important; color: #374151 !important; filter: none !important; }
+.stButton button[kind="secondary"]:hover { background: #f9fafb !important; }
 
-.stTextInput input, .stTextArea textarea, .stSelectbox select {
-    font-family: 'DM Sans', sans-serif !important; font-size: 13px !important;
-    border-radius: 5px !important; border-color: #e2e8f0 !important;
+/* ── Inputs ──────────────────────────────────────────────────────────────── */
+.stTextInput input, .stTextArea textarea {
+    font-family: 'Inter', sans-serif !important; font-size: 13px !important;
+    border-radius: 6px !important; border-color: #e5e7eb !important; color: #111827 !important;
 }
-.stSelectbox [data-baseweb="select"] { border-radius: 5px !important; }
+.stSelectbox [data-baseweb="select"] { border-radius: 6px !important; }
+.stSelectbox [data-baseweb="select"] > div { font-size: 12px !important; }
 
-h4 { font-size: 13px !important; font-weight: 600 !important; color: #475569 !important; text-transform: uppercase !important; letter-spacing: 0.06em !important; }
-.stCaptionContainer, [data-testid="stCaptionContainer"] { color: #94a3b8 !important; font-size: 12px !important; }
-[data-testid="stToast"] { font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; }
-.stRadio label { font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; font-weight: 500 !important; }
-code { font-family: 'DM Mono', monospace !important; font-size: 11px !important; background: #f1f5f9 !important; color: #475569 !important; border-radius: 4px !important; padding: 1px 6px !important; }
+/* ── Typography ──────────────────────────────────────────────────────────── */
+h4 { font-size: 11px !important; font-weight: 600 !important; color: #6b7280 !important;
+     text-transform: uppercase !important; letter-spacing: 0.08em !important; }
+.stCaptionContainer, [data-testid="stCaptionContainer"] { color: #9ca3af !important; font-size: 11px !important; }
+[data-testid="stToast"] { font-family: 'Inter', sans-serif !important; font-size: 13px !important; }
+.stRadio label { font-family: 'Inter', sans-serif !important; font-size: 12px !important; font-weight: 500 !important; }
+code { font-family: 'DM Mono', monospace !important; font-size: 11px !important;
+       background: #f3f4f6 !important; color: #6b7280 !important;
+       border-radius: 4px !important; padding: 1px 6px !important; }
 
-.gcal-status { font-size: 12px; font-weight: 500; color: #15803d; margin-top: 8px; }
-.gcal-warn   { font-size: 12px; color: #94a3b8; margin-top: 8px; }
+/* ── Kanban column headers ────────────────────────────────────────────────── */
+.col-header { font-size: 11px; font-weight: 600; color: #9ca3af; text-transform: uppercase;
+              letter-spacing: 0.08em; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
 
-/* ── Automatic dark mode — Claude palette ── */
+/* ── Dark mode ───────────────────────────────────────────────────────────── */
 @media (prefers-color-scheme: dark) {
 
     /* Backgrounds */
     .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
-    [data-testid="stHeader"], .block-container {
-        background-color: #1a1a1a !important;
-    }
+    [data-testid="stHeader"], .block-container { background-color: #0d0d0d !important; }
 
     /* Typography */
-    html, body, p, span, div, label, [class*="css"], .stMarkdown {
-        color: #f0f0f0 !important;
-    }
-    .app-title    { color: #ffffff !important; }
-    .app-subtitle { color: #9ca3af !important; }
-    h4            { color: #9ca3af !important; }
-
-    /* Card text (overrides the hardcoded inline colours) */
-    div[data-testid="stVerticalBlockBorderWrapper"] p { color: #c0c0c0 !important; }
+    html, body, p, span, div, label, [class*="css"], .stMarkdown { color: #e5e7eb !important; }
+    .app-title    { color: #f9fafb !important; }
+    .app-subtitle { color: #6b7280 !important; }
+    h4            { color: #6b7280 !important; }
+    .gcal-status  { color: #34d399 !important; }
+    .gcal-warn    { color: #6b7280 !important; }
 
     /* Dividers */
-    hr { border-color: #333333 !important; }
+    hr { border-top: 1px solid #1f1f1f !important; }
 
     /* Tabs */
-    .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #333333 !important; background: transparent !important; }
-    .stTabs [data-baseweb="tab"]      { color: #9ca3af !important; }
-    .stTabs [aria-selected="true"]    { color: #ffffff !important; border-bottom: 2px solid #ffffff !important; background: transparent !important; }
+    .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #1f1f1f !important; }
+    .stTabs [data-baseweb="tab"]      { color: #6b7280 !important; }
+    .stTabs [aria-selected="true"]    { color: #f9fafb !important; border-bottom: 2px solid #f9fafb !important; }
 
     /* Cards */
     div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #262626 !important;
-        border-color: #333333 !important;
+        background: #111111 !important; border-color: #1f1f1f !important;
     }
+    div[data-testid="stVerticalBlockBorderWrapper"] p { color: #d1d5db !important; }
+
+    /* Card title button in dark mode */
+    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"] {
+        background: #1a1a1a !important; color: #f9fafb !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"]:hover {
+        background: #262626 !important; color: #f9fafb !important;
+    }
+
+    /* Card delete button in dark mode */
+    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"] {
+        color: #374151 !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"]:hover {
+        color: #ef4444 !important;
+    }
+
+    /* Global buttons */
+    .stButton button[kind="primary"]         { background: #f9fafb !important; color: #0d0d0d !important; }
+    .stButton button[kind="primary"]:hover   { background: #e5e7eb !important; }
+    .stButton button[kind="secondary"]       { background: #111111 !important; border-color: #1f1f1f !important; color: #9ca3af !important; }
+    .stButton button[kind="secondary"]:hover { background: #1a1a1a !important; color: #f9fafb !important; }
 
     /* Inputs */
     .stTextInput input, .stTextArea textarea {
-        background-color: #2d2d2d !important;
-        color: #f0f0f0 !important;
-        border-color: #3a3a3a !important;
+        background-color: #111111 !important; color: #f9fafb !important; border-color: #1f1f1f !important;
     }
-    .stTextInput input::placeholder, .stTextArea textarea::placeholder { color: #6b7280 !important; }
+    .stTextInput input::placeholder, .stTextArea textarea::placeholder { color: #4b5563 !important; }
 
     /* Selectboxes */
     .stSelectbox [data-baseweb="select"] > div, div[data-baseweb="select"] > div {
-        background-color: #2d2d2d !important;
-        color: #f0f0f0 !important;
-        border-color: #3a3a3a !important;
+        background-color: #111111 !important; color: #f9fafb !important; border-color: #1f1f1f !important;
     }
-    [data-baseweb="menu"], [data-baseweb="popover"] { background-color: #262626 !important; }
-    [data-baseweb="option"]       { background-color: #262626 !important; color: #f0f0f0 !important; }
-    [data-baseweb="option"]:hover { background-color: #333333 !important; }
-
-    /* Secondary buttons */
-    .stButton button[kind="secondary"] {
-        background: #2d2d2d !important; border: 1px solid #3a3a3a !important;
-        color: #9ca3af !important; filter: none !important;
-    }
-    .stButton button[kind="secondary"]:hover { background: #383838 !important; color: #f0f0f0 !important; }
+    [data-baseweb="menu"], [data-baseweb="popover"] { background-color: #111111 !important; }
+    [data-baseweb="option"]       { background-color: #111111 !important; color: #e5e7eb !important; }
+    [data-baseweb="option"]:hover { background-color: #1a1a1a !important; }
 
     /* Misc */
-    .stCheckbox label, .stRadio label, [data-testid="stRadio"] { color: #f0f0f0 !important; }
-    .stCaptionContainer, [data-testid="stCaptionContainer"] { color: #9ca3af !important; }
-    code { background: #2d2d2d !important; color: #9ca3af !important; }
+    .stCheckbox label, .stRadio label, [data-testid="stRadio"] { color: #e5e7eb !important; }
+    .stCaptionContainer, [data-testid="stCaptionContainer"] { color: #6b7280 !important; }
+    code { background: #1a1a1a !important; color: #6b7280 !important; }
 
     /* Expander */
-    [data-testid="stExpander"]         { border-color: #333333 !important; background-color: #1a1a1a !important; }
-    [data-testid="stExpander"] summary { color: #f0f0f0 !important; }
+    [data-testid="stExpander"]         { border-color: #1f1f1f !important; background-color: #0d0d0d !important; }
+    [data-testid="stExpander"] summary { color: #e5e7eb !important; }
 
     /* Dialog */
     [data-testid="stDialog"] > div, [data-baseweb="modal"] > div {
-        background-color: #1f1f1f !important;
-        border: 1px solid #333333 !important;
+        background-color: #111111 !important; border: 1px solid #1f1f1f !important;
     }
 
     /* Toast */
-    [data-testid="stToast"] { background-color: #262626 !important; color: #f0f0f0 !important; }
+    [data-testid="stToast"] { background-color: #111111 !important; color: #e5e7eb !important; }
 
-    /* Calendar status */
-    .gcal-status { color: #34d399 !important; }
-    .gcal-warn   { color: #9ca3af !important; }
-
-    /* ── Badges — override inline styles for dark mode ── */
+    /* Badges */
     span.task-badge[data-badge="low"]         { background: #1e3a5f !important; color: #93c5fd !important; }
     span.task-badge[data-badge="medium"]      { background: #431407 !important; color: #fdba74 !important; }
     span.task-badge[data-badge="high"]        { background: #2e1065 !important; color: #d8b4fe !important; }
@@ -868,55 +914,53 @@ code { font-family: 'DM Mono', monospace !important; font-size: 11px !important;
     span.task-badge[data-badge="pending"]     { background: #4a0d2e !important; color: #f9a8d4 !important; }
     span.task-badge[data-badge="in-progress"] { background: #431407 !important; color: #fdba74 !important; }
     span.task-badge[data-badge="completed"]   { background: #052e16 !important; color: #86efac !important; }
-    span.task-badge[data-badge="archived"]    { background: #1e293b !important; color: #94a3b8 !important; }
+    span.task-badge[data-badge="archived"]    { background: #1a1a1a !important; color: #6b7280 !important; }
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
-hc1, hc2, hc3, hc4, hc5, hc6 = st.columns([2, 2.8, 1.2, 1.2, 1.1, 1.3])
+hc1, hc2, hc3 = st.columns([4, 1.2, 1.5])
 with hc1:
     st.markdown("""
-    <div class="app-header">
-        <div>
-            <div class="app-title">Personal Tasks</div>
-            <div class="app-subtitle">Task Manager</div>
-        </div>
+    <div style="padding: 4px 0 6px;">
+        <div class="app-title">Personal Tasks</div>
+        <div class="app-subtitle">Task Manager</div>
     </div>
     """, unsafe_allow_html=True)
 with hc2:
-    search = st.text_input("Search", placeholder="Search tasks or notes", label_visibility="collapsed")
-with hc3:
-    filter_priority = st.selectbox("Priority", ["All", "Low", "Medium", "High", "Urgent"], label_visibility="collapsed")
-with hc4:
-    filter_status = st.selectbox("Status", ["All", "Pending", "In Progress", "Completed"], label_visibility="collapsed")
-with hc5:
     if not _GCAL_PKGS:
         st.markdown("<p class='gcal-warn'>⚠ Reboot app</p>", unsafe_allow_html=True)
     elif not has_gcal_secrets():
         st.markdown("<p class='gcal-warn'>⚠ Add secrets</p>", unsafe_allow_html=True)
     elif gcal_connected():
         sheets_ok = _sheets_id() and "storage_error" not in st.session_state
-        status    = "📅💾 Connected" if sheets_ok else ("📅 Calendar only" if _sheets_id() else "📅 Connected")
+        status    = "📅💾 Connected" if sheets_ok else "📅 Connected"
         st.markdown(f"<p class='gcal-status'>{status}</p>", unsafe_allow_html=True)
     else:
-        st.markdown("<p class='gcal-warn'>⚠ Invalid creds</p>", unsafe_allow_html=True)
-with hc6:
+        st.markdown("<p class='gcal-warn'>⚠ Calendar error</p>", unsafe_allow_html=True)
+with hc3:
     if gcal_connected():
-        if st.button("⬇ Sync Calendar", use_container_width=True, help="Import new events from all configured calendars"):
+        if st.button("⬇ Sync Calendar", use_container_width=True):
             n = sync_from_calendar()
-            if n:
-                st.session_state["gcal_toast"] = f"Imported {n} new task{'s' if n != 1 else ''} from Calendar"
-            else:
-                st.session_state["gcal_toast"] = "All calendars up to date"
+            st.session_state["gcal_toast"] = (
+                f"Imported {n} new task{'s' if n != 1 else ''} from Calendar" if n
+                else "All calendars up to date"
+            )
             st.rerun()
 
 st.markdown("---")
 
 # ── Location tabs ─────────────────────────────────────────────────────────────
 
-tab_labels = []
+_today_s     = date.today().isoformat()
+_today_count = sum(
+    1 for j in st.session_state.jobs
+    if j.get("dueDate") and j["dueDate"] <= _today_s
+    and j["status"] not in ("Completed", "Archived")
+)
+tab_labels = [f"Today  ({_today_count})" if _today_count else "Today"]
 for loc in st.session_state.tabs_list:
     n = sum(1 for j in st.session_state.jobs if j["location"] == loc and j["status"] != "Archived")
     tab_labels.append(f"{loc}  ({n})")
@@ -926,50 +970,47 @@ tab_labels.append(f"Archived Lists  ({archived_count})" if archived_count else "
 
 loc_tabs = st.tabs(tab_labels)
 
-for i, tab_ctx in enumerate(loc_tabs[:-2]):
+# ── Today tab (index 0) ───────────────────────────────────────────────────────
+with loc_tabs[0]:
+    render_today_tab()
+
+# ── List tabs (index 1 … len(tabs)+1) ────────────────────────────────────────
+for i, tab_ctx in enumerate(loc_tabs[1:-2]):
     with tab_ctx:
         loc = st.session_state.tabs_list[i]
 
-        vc, _, ac, arc, dc = st.columns([2, 2.5, 1.5, 1.5, 1.5])
-        with vc:
-            view = st.radio(
-                "View", ["Active", "Archive"],
-                horizontal=True, key=f"view_{loc}", label_visibility="collapsed",
+        fc1, fc2, fc3, fc4 = st.columns([1.3, 1.3, 1.2, 1])
+        with fc1:
+            filter_priority = st.selectbox(
+                "Priority", ["All", "Low", "Medium", "High", "Urgent"],
+                label_visibility="collapsed", key=f"fp_{loc}",
             )
-        with ac:
+        with fc2:
+            filter_status = st.selectbox(
+                "Status", ["All", "Pending", "In Progress", "Completed"],
+                label_visibility="collapsed", key=f"fs_{loc}",
+            )
+        with fc3:
             if st.button("+ Add Task", key=f"add_{loc}", type="primary", use_container_width=True):
                 st.session_state.dlg_job_id   = None
                 st.session_state.dlg_location = loc
                 st.session_state.dlg_open     = True
                 st.rerun()
-        with arc:
-            if st.button("Archive List", key=f"arc_tab_{loc}", use_container_width=True):
-                for j in st.session_state.jobs:
-                    if j["location"] == loc:
-                        j["status"] = "Archived"
-                st.session_state.tabs_list = [t for t in st.session_state.tabs_list if t != loc]
-                st.session_state.archived_tabs.append(loc)
-                save_data()
-                st.rerun()
-        with dc:
-            if st.button("Delete List", key=f"del_tab_{loc}", use_container_width=True):
-                # Delete calendar events for all jobs in this list
-                for j in st.session_state.jobs:
-                    if j["location"] == loc and j.get("calEventId"):
-                        delete_gcal_event(j["calEventId"])
-                st.session_state.tabs_list = [t for t in st.session_state.tabs_list if t != loc]
-                st.session_state.jobs      = [j for j in st.session_state.jobs if j["location"] != loc]
-                save_data()
-                st.rerun()
+        with fc4:
+            view = st.radio(
+                "View", ["Active", "Archive"],
+                horizontal=True, key=f"view_{loc}", label_visibility="collapsed",
+            )
 
         with st.expander("List Settings"):
             tabs_list = st.session_state.tabs_list
             idx       = tabs_list.index(loc)
 
-            st.markdown("<p style='font-size:12px;font-weight:600;color:#475569;margin-bottom:2px;'>Rename List</p>", unsafe_allow_html=True)
+            st.caption("Rename")
             rc1, rc2 = st.columns([3, 1])
             with rc1:
-                new_name_val = st.text_input("New name", value=loc, key=f"rename_{loc}", label_visibility="collapsed", placeholder="New list name")
+                new_name_val = st.text_input("New name", value=loc, key=f"rename_{loc}",
+                                             label_visibility="collapsed", placeholder="New list name")
             with rc2:
                 if st.button("Save", key=f"rename_save_{loc}", type="primary", use_container_width=True):
                     n = new_name_val.strip()
@@ -985,7 +1026,7 @@ for i, tab_ctx in enumerate(loc_tabs[:-2]):
                         save_data()
                         st.rerun()
 
-            st.markdown("<p style='font-size:12px;font-weight:600;color:#475569;margin:8px 0 2px;'>Reorder List</p>", unsafe_allow_html=True)
+            st.caption("Reorder")
             oc1, oc2, oc3 = st.columns([1, 1, 4])
             with oc1:
                 if st.button("← Left", key=f"move_left_{loc}", use_container_width=True, disabled=(idx == 0)):
@@ -998,15 +1039,33 @@ for i, tab_ctx in enumerate(loc_tabs[:-2]):
                     save_data()
                     st.rerun()
             with oc3:
-                st.markdown(
-                    f"<p style='font-size:11px;color:#94a3b8;margin:6px 0 0;'>Position {idx + 1} of {len(tabs_list)}</p>",
-                    unsafe_allow_html=True,
-                )
+                st.caption(f"Position {idx + 1} of {len(tabs_list)}")
+
+            st.caption("Danger zone")
+            dz1, dz2 = st.columns(2)
+            with dz1:
+                if st.button("Archive List", key=f"arc_tab_{loc}", use_container_width=True):
+                    for j in st.session_state.jobs:
+                        if j["location"] == loc:
+                            j["status"] = "Archived"
+                    st.session_state.tabs_list = [t for t in st.session_state.tabs_list if t != loc]
+                    st.session_state.archived_tabs.append(loc)
+                    save_data()
+                    st.rerun()
+            with dz2:
+                if st.button("Delete List", key=f"del_tab_{loc}", use_container_width=True):
+                    for j in st.session_state.jobs:
+                        if j["location"] == loc and j.get("calEventId"):
+                            delete_gcal_event(j["calEventId"], loc)
+                    st.session_state.tabs_list = [t for t in st.session_state.tabs_list if t != loc]
+                    st.session_state.jobs      = [j for j in st.session_state.jobs if j["location"] != loc]
+                    save_data()
+                    st.rerun()
 
         st.divider()
-        render_kanban(loc, view, search, filter_priority, filter_status)
+        render_kanban(loc, view, filter_priority, filter_status)
 
-# ── New List ──────────────────────────────────────────────────────────────────
+# ── New List & Archived Lists ─────────────────────────────────────────────────
 
 with loc_tabs[-2]:
     st.markdown("### Add a new list")
