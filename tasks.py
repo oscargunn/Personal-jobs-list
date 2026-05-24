@@ -610,7 +610,7 @@ def render_active_card(job: dict, lk: str):
                 unsafe_allow_html=True,
             )
         with dc:
-            if st.button("🗑", key=f"del_{lk}_{job['id']}", use_container_width=True):
+            if st.button("🗑", key=f"del_{lk}_{job['id']}"):
                 remove_job(job["id"])
                 st.rerun()
 
@@ -850,16 +850,29 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
 div[data-testid="stVerticalBlockBorderWrapper"] > div { padding: 10px 12px !important; }
 div[data-testid="stVerticalBlockBorderWrapper"] p { margin: 0 !important; line-height: 1.4 !important; }
 
+/* ── Global buttons ──────────────────────────────────────────────────────── */
+.stButton button {
+    font-family: 'Inter', sans-serif !important; font-size: 12px !important;
+    font-weight: 500 !important; border-radius: 6px !important;
+    letter-spacing: 0 !important; min-height: 30px !important;
+    padding: 0 12px !important;
+    /* No fixed height — let content determine size */
+}
+.stButton button[kind="primary"]         { background: #111827 !important; border: none !important; color: #ffffff !important; }
+.stButton button[kind="primary"]:hover   { background: #1f2937 !important; }
+.stButton button[kind="secondary"]       { background: #ffffff !important; border: 1px solid #e5e7eb !important; color: #374151 !important; filter: none !important; }
+.stButton button[kind="secondary"]:hover { background: #f9fafb !important; }
+
 /* ── Card title button (primary inside a card) ───────────────────────────── */
 div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"] {
     background: #f3f4f6 !important; color: #111827 !important;
     border: none !important; border-radius: 6px !important;
     text-align: center !important; font-size: 13px !important; font-weight: 600 !important;
-    min-height: 44px !important; height: auto !important;
+    min-height: 40px !important;
     padding: 10px 14px !important; white-space: normal !important;
     word-break: break-word !important; line-height: 1.4 !important;
     letter-spacing: -0.01em !important; width: 100% !important;
-    box-shadow: none !important;
+    box-shadow: none !important; overflow: visible !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"]:hover {
     background: #e5e7eb !important; color: #111827 !important;
@@ -869,24 +882,12 @@ div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"]
 div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"] {
     background: transparent !important; border: none !important;
     color: #d1d5db !important; font-size: 14px !important;
-    padding: 2px 4px !important; height: 26px !important; min-height: 26px !important;
-    box-shadow: none !important; filter: none !important;
+    padding: 2px 6px !important; min-height: 28px !important;
+    box-shadow: none !important; filter: none !important; width: auto !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"]:hover {
     color: #ef4444 !important; background: transparent !important;
 }
-
-/* ── Global buttons ──────────────────────────────────────────────────────── */
-.stButton button {
-    font-family: 'Inter', sans-serif !important; font-size: 12px !important;
-    font-weight: 500 !important; border-radius: 6px !important;
-    letter-spacing: 0 !important; height: 30px !important; min-height: 30px !important;
-    padding: 0 12px !important;
-}
-.stButton button[kind="primary"]         { background: #111827 !important; border: none !important; color: #ffffff !important; }
-.stButton button[kind="primary"]:hover   { background: #1f2937 !important; }
-.stButton button[kind="secondary"]       { background: #ffffff !important; border: 1px solid #e5e7eb !important; color: #374151 !important; filter: none !important; }
-.stButton button[kind="secondary"]:hover { background: #f9fafb !important; }
 
 /* ── Inputs ──────────────────────────────────────────────────────────────── */
 .stTextInput input, .stTextArea textarea {
