@@ -242,6 +242,37 @@ def sync_from_calendar() -> int:
         save_data()
     return added
 
+def purge_missing_cal_events() -> int:
+    """Remove tasks whose linked Google Calendar event was deleted.
+    Checks each task that has a calEventId; if the API returns 404 (or the
+    event status is 'cancelled') the task is removed from the local list."""
+    svc = _get_service()
+    if not svc:
+        return 0
+
+    to_remove = []
+    for job in st.session_state.jobs:
+        event_id = job.get("calEventId")
+        if not event_id:
+            continue
+        cal_id = _calendar_id_for_tab(job.get("location", ""))
+        try:
+            event = svc.events().get(calendarId=cal_id, eventId=event_id).execute()
+            if event.get("status") == "cancelled":
+                to_remove.append(job["id"])
+        except Exception as e:
+            # 404 means the event no longer exists
+            if "404" in str(e) or "notFound" in str(e).lower():
+                to_remove.append(job["id"])
+
+    for jid in to_remove:
+        st.session_state.jobs = [j for j in st.session_state.jobs if j["id"] != jid]
+
+    if to_remove:
+        save_data()
+    return len(to_remove)
+
+
 # ── Google Sheets persistence ─────────────────────────────────────────────────
 # Service accounts can read/write Sheets without storage-quota issues.
 # Setup: create a Google Sheet, share it with the service account (Editor),
@@ -275,13 +306,17 @@ def _load_from_sheets() -> dict | None:
     try:
         result = (
             svc.spreadsheets().values()
-            .get(spreadsheetId=sid, range="A1")
+            .get(spreadsheetId=sid, range="A:A")
             .execute()
         )
         values = result.get("values", [])
-        if values and values[0] and values[0][0].strip():
-            return json.loads(values[0][0])
-        return {}   # empty sheet = fresh start (not an error)
+        if not values:
+            return {}   # empty sheet = fresh start (not an error)
+        # Concatenate all chunks (each row is one chunk of the JSON)
+        raw = "".join(row[0] for row in values if row and row[0].strip())
+        if not raw:
+            return {}
+        return json.loads(raw)
     except Exception as e:
         st.session_state["storage_error"] = f"Sheets load failed: {e}"
         return None
@@ -293,11 +328,20 @@ def _save_to_sheets(data: dict):
     if not svc or not sid:
         return
     try:
+        raw = json.dumps(data)
+        # Google Sheets has a 50 000-char per-cell limit.
+        # Split the JSON into 45 000-char chunks across consecutive rows in col A.
+        chunk_size = 45_000
+        chunks     = [raw[i : i + chunk_size] for i in range(0, len(raw), chunk_size)]
+        # Clear column A first so stale chunks don't linger
+        svc.spreadsheets().values().clear(
+            spreadsheetId=sid, range="A:A"
+        ).execute()
         svc.spreadsheets().values().update(
             spreadsheetId=sid,
-            range="A1",
+            range=f"A1:A{len(chunks)}",
             valueInputOption="RAW",
-            body={"values": [[json.dumps(data)]]},
+            body={"values": [[c] for c in chunks]},
         ).execute()
         st.session_state.pop("storage_error", None)
     except Exception as e:
@@ -1062,11 +1106,16 @@ with hc2:
 with hc3:
     if gcal_connected():
         if st.button("⬇ Sync Calendar", use_container_width=True):
-            n = sync_from_calendar()
-            st.session_state["gcal_toast"] = (
-                f"Imported {n} new task{'s' if n != 1 else ''} from Calendar" if n
-                else "All calendars up to date"
-            )
+            removed = purge_missing_cal_events()
+            n       = sync_from_calendar()
+            parts   = []
+            if removed:
+                parts.append(f"Removed {removed} deleted event{'s' if removed != 1 else ''}")
+            if n:
+                parts.append(f"imported {n} new task{'s' if n != 1 else ''}")
+            if not parts:
+                parts.append("All calendars up to date")
+            st.session_state["gcal_toast"] = "  ·  ".join(parts).capitalize()
             st.rerun()
 
 st.markdown("---")
