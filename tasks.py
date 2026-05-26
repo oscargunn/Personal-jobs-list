@@ -697,10 +697,13 @@ def render_active_card(job: dict, lk: str):
         notes = job.get("notes", "") or job.get("description", "")
         if notes:
             clipped = (notes[:100].rstrip() + "…") if len(notes) > 100 else notes
+            # Collapse newlines — a \n\n inside the <p> causes Streamlit to
+            # break out into a new full-size markdown paragraph (the big text bug).
+            clipped_safe = " ".join(clipped.split())
             st.markdown(
                 f"<p style='font-size:11px;color:#6b7280;margin:2px 0 4px;"
                 f"overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;"
-                f"-webkit-box-orient:vertical;'>{clipped}</p>",
+                f"-webkit-box-orient:vertical;'>{clipped_safe}</p>",
                 unsafe_allow_html=True,
             )
 
@@ -979,100 +982,157 @@ div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox { margin: 4px 0 2px
               letter-spacing: 0.08em; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
 
 /* ── Dark mode ───────────────────────────────────────────────────────────── */
-@media (prefers-color-scheme: dark) {
+/* Applied via both OS media query AND Streamlit's own data-theme attribute  */
+/* so it works whether the user set dark mode in OS settings or Streamlit UI */
+@media (prefers-color-scheme: dark) { .stApp { --dm: 1; } }
+[data-theme="dark"]                 { --dm: 1; }
 
-    /* Backgrounds */
+@media (prefers-color-scheme: dark) {
     .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
     [data-testid="stHeader"], .block-container { background-color: #0d0d0d !important; }
+}
+[data-theme="dark"] .stApp,
+[data-theme="dark"] [data-testid="stAppViewContainer"],
+[data-theme="dark"] [data-testid="stMain"],
+[data-theme="dark"] [data-testid="stHeader"],
+[data-theme="dark"] .block-container { background-color: #0d0d0d !important; }
 
-    /* Typography */
+/* ── Dark typography ──────────────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
     html, body, p, span, div, label, [class*="css"], .stMarkdown { color: #e5e7eb !important; }
-    .app-title    { color: #f9fafb !important; }
-    .app-subtitle { color: #6b7280 !important; }
-    h4            { color: #6b7280 !important; }
-    .gcal-status  { color: #34d399 !important; }
-    .gcal-warn    { color: #6b7280 !important; }
-
-    /* Dividers */
+    .app-title { color: #f9fafb !important; } .app-subtitle { color: #6b7280 !important; }
+    h4 { color: #6b7280 !important; } .gcal-status { color: #34d399 !important; } .gcal-warn { color: #6b7280 !important; }
     hr { border-top: 1px solid #1f1f1f !important; }
-
-    /* Tabs */
     .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #1f1f1f !important; }
-    .stTabs [data-baseweb="tab"]      { color: #6b7280 !important; }
-    .stTabs [aria-selected="true"]    { color: #f9fafb !important; border-bottom: 2px solid #f9fafb !important; }
+    .stTabs [data-baseweb="tab"]   { color: #6b7280 !important; }
+    .stTabs [aria-selected="true"] { color: #f9fafb !important; border-bottom: 2px solid #f9fafb !important; }
+}
+[data-theme="dark"] html, [data-theme="dark"] body,
+[data-theme="dark"] p, [data-theme="dark"] span,
+[data-theme="dark"] div, [data-theme="dark"] label,
+[data-theme="dark"] .stMarkdown { color: #e5e7eb !important; }
+[data-theme="dark"] .app-title    { color: #f9fafb !important; }
+[data-theme="dark"] .app-subtitle { color: #6b7280 !important; }
+[data-theme="dark"] h4            { color: #6b7280 !important; }
+[data-theme="dark"] .gcal-status  { color: #34d399 !important; }
+[data-theme="dark"] .gcal-warn    { color: #6b7280 !important; }
+[data-theme="dark"] hr            { border-top: 1px solid #1f1f1f !important; }
+[data-theme="dark"] .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #1f1f1f !important; }
+[data-theme="dark"] .stTabs [data-baseweb="tab"]   { color: #6b7280 !important; }
+[data-theme="dark"] .stTabs [aria-selected="true"] { color: #f9fafb !important; border-bottom: 2px solid #f9fafb !important; }
 
-    /* Cards */
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        background: #111111 !important; border-color: #1f1f1f !important;
-    }
+/* ── Dark cards ───────────────────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+    div[data-testid="stVerticalBlockBorderWrapper"] { background: #111111 !important; border-color: #1f1f1f !important; }
     div[data-testid="stVerticalBlockBorderWrapper"] p { color: #d1d5db !important; }
-
-    /* Overdue card highlight – dark mode */
     div[data-testid="stVerticalBlockBorderWrapper"]:has(.overdue-marker) {
-        border-color: #b91c1c !important;
-        border-left: 3px solid #b91c1c !important;
+        border-color: #b91c1c !important; border-left: 3px solid #b91c1c !important;
         background: rgba(127, 29, 29, 0.22) !important;
     }
+}
+[data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"] { background: #111111 !important; border-color: #1f1f1f !important; }
+[data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"] p { color: #d1d5db !important; }
+[data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"]:has(.overdue-marker) {
+    border-color: #b91c1c !important; border-left: 3px solid #b91c1c !important;
+    background: rgba(127, 29, 29, 0.22) !important;
+}
 
-    /* In-card selectbox dark mode */
-    div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="select"] > div {
-        background: transparent !important; border-color: #1f1f1f !important; color: #9ca3af !important;
-    }
-
-    /* Card title button in dark mode */
-    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"] {
-        background: #1a1a1a !important; color: #f9fafb !important;
-    }
-    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"]:hover {
-        background: #262626 !important; color: #f9fafb !important;
-    }
-
-    /* Card delete button in dark mode */
-    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"] {
-        color: #374151 !important;
-    }
-    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"]:hover {
-        color: #ef4444 !important;
-    }
-
-    /* Global buttons */
+/* ── Dark global buttons ──────────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
     .stButton button[kind="primary"]         { background: #f9fafb !important; color: #0d0d0d !important; }
     .stButton button[kind="primary"]:hover   { background: #e5e7eb !important; }
     .stButton button[kind="secondary"]       { background: #111111 !important; border-color: #1f1f1f !important; color: #9ca3af !important; }
     .stButton button[kind="secondary"]:hover { background: #1a1a1a !important; color: #f9fafb !important; }
+}
+[data-theme="dark"] .stButton button[kind="primary"]         { background: #f9fafb !important; color: #0d0d0d !important; }
+[data-theme="dark"] .stButton button[kind="primary"]:hover   { background: #e5e7eb !important; }
+[data-theme="dark"] .stButton button[kind="secondary"]       { background: #111111 !important; border-color: #1f1f1f !important; color: #9ca3af !important; }
+[data-theme="dark"] .stButton button[kind="secondary"]:hover { background: #1a1a1a !important; color: #f9fafb !important; }
 
-    /* Inputs */
+/* ── Dark card title button — MUST come after global button rules ─────────── */
+@media (prefers-color-scheme: dark) {
+    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"] {
+        background: #1e1e1e !important; color: #f9fafb !important; border: 1px solid #2d2d2d !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"]:hover {
+        background: #2a2a2a !important; color: #ffffff !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"] { color: #374151 !important; }
+    div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"]:hover { color: #ef4444 !important; }
+}
+[data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"] {
+    background: #1e1e1e !important; color: #f9fafb !important; border: 1px solid #2d2d2d !important;
+}
+[data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="primary"]:hover {
+    background: #2a2a2a !important; color: #ffffff !important;
+}
+[data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"] { color: #374151 !important; }
+[data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"] .stButton button[kind="secondary"]:hover { color: #ef4444 !important; }
+
+/* ── Dark in-card selectbox ───────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+    div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="select"] > div {
+        background: #1e1e1e !important; border-color: #2d2d2d !important; color: #9ca3af !important;
+    }
+}
+[data-theme="dark"] div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="select"] > div {
+    background: #1e1e1e !important; border-color: #2d2d2d !important; color: #9ca3af !important;
+}
+
+/* ── Dark inputs & selectboxes ────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
     .stTextInput input, .stTextArea textarea {
         background-color: #111111 !important; color: #f9fafb !important; border-color: #1f1f1f !important;
     }
     .stTextInput input::placeholder, .stTextArea textarea::placeholder { color: #4b5563 !important; }
-
-    /* Selectboxes */
     .stSelectbox [data-baseweb="select"] > div, div[data-baseweb="select"] > div {
         background-color: #111111 !important; color: #f9fafb !important; border-color: #1f1f1f !important;
     }
     [data-baseweb="menu"], [data-baseweb="popover"] { background-color: #111111 !important; }
     [data-baseweb="option"]       { background-color: #111111 !important; color: #e5e7eb !important; }
     [data-baseweb="option"]:hover { background-color: #1a1a1a !important; }
+}
+[data-theme="dark"] .stTextInput input,
+[data-theme="dark"] .stTextArea textarea {
+    background-color: #111111 !important; color: #f9fafb !important; border-color: #1f1f1f !important;
+}
+[data-theme="dark"] .stTextInput input::placeholder,
+[data-theme="dark"] .stTextArea textarea::placeholder { color: #4b5563 !important; }
+[data-theme="dark"] .stSelectbox [data-baseweb="select"] > div,
+[data-theme="dark"] div[data-baseweb="select"] > div {
+    background-color: #111111 !important; color: #f9fafb !important; border-color: #1f1f1f !important;
+}
+[data-theme="dark"] [data-baseweb="menu"],
+[data-theme="dark"] [data-baseweb="popover"] { background-color: #111111 !important; }
+[data-theme="dark"] [data-baseweb="option"]       { background-color: #111111 !important; color: #e5e7eb !important; }
+[data-theme="dark"] [data-baseweb="option"]:hover { background-color: #1a1a1a !important; }
 
-    /* Misc */
+/* ── Dark misc ────────────────────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
     .stCheckbox label, .stRadio label, [data-testid="stRadio"] { color: #e5e7eb !important; }
     .stCaptionContainer, [data-testid="stCaptionContainer"] { color: #6b7280 !important; }
     code { background: #1a1a1a !important; color: #6b7280 !important; }
-
-    /* Expander */
     [data-testid="stExpander"]         { border-color: #1f1f1f !important; background-color: #0d0d0d !important; }
     [data-testid="stExpander"] summary { color: #e5e7eb !important; }
-
-    /* Dialog */
     [data-testid="stDialog"] > div, [data-baseweb="modal"] > div {
         background-color: #111111 !important; border: 1px solid #1f1f1f !important;
     }
-
-    /* Toast */
     [data-testid="stToast"] { background-color: #111111 !important; color: #e5e7eb !important; }
+}
+[data-theme="dark"] .stCheckbox label,
+[data-theme="dark"] .stRadio label,
+[data-theme="dark"] [data-testid="stRadio"]        { color: #e5e7eb !important; }
+[data-theme="dark"] .stCaptionContainer,
+[data-theme="dark"] [data-testid="stCaptionContainer"] { color: #6b7280 !important; }
+[data-theme="dark"] code                           { background: #1a1a1a !important; color: #6b7280 !important; }
+[data-theme="dark"] [data-testid="stExpander"]     { border-color: #1f1f1f !important; background-color: #0d0d0d !important; }
+[data-theme="dark"] [data-testid="stExpander"] summary { color: #e5e7eb !important; }
+[data-theme="dark"] [data-testid="stDialog"] > div,
+[data-theme="dark"] [data-baseweb="modal"] > div   { background-color: #111111 !important; border: 1px solid #1f1f1f !important; }
+[data-theme="dark"] [data-testid="stToast"]        { background-color: #111111 !important; color: #e5e7eb !important; }
 
-    /* Badges */
+/* ── Dark badges ──────────────────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
     span.task-badge[data-badge="low"]         { background: #1e3a5f !important; color: #93c5fd !important; }
     span.task-badge[data-badge="medium"]      { background: #431407 !important; color: #fdba74 !important; }
     span.task-badge[data-badge="high"]        { background: #2e1065 !important; color: #d8b4fe !important; }
@@ -1082,6 +1142,14 @@ div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox { margin: 4px 0 2px
     span.task-badge[data-badge="completed"]   { background: #052e16 !important; color: #86efac !important; }
     span.task-badge[data-badge="archived"]    { background: #1a1a1a !important; color: #6b7280 !important; }
 }
+[data-theme="dark"] span.task-badge[data-badge="low"]         { background: #1e3a5f !important; color: #93c5fd !important; }
+[data-theme="dark"] span.task-badge[data-badge="medium"]      { background: #431407 !important; color: #fdba74 !important; }
+[data-theme="dark"] span.task-badge[data-badge="high"]        { background: #2e1065 !important; color: #d8b4fe !important; }
+[data-theme="dark"] span.task-badge[data-badge="urgent"]      { background: #450a0a !important; color: #fca5a5 !important; }
+[data-theme="dark"] span.task-badge[data-badge="pending"]     { background: #4a0d2e !important; color: #f9a8d4 !important; }
+[data-theme="dark"] span.task-badge[data-badge="in-progress"] { background: #431407 !important; color: #fdba74 !important; }
+[data-theme="dark"] span.task-badge[data-badge="completed"]   { background: #052e16 !important; color: #86efac !important; }
+[data-theme="dark"] span.task-badge[data-badge="archived"]    { background: #1a1a1a !important; color: #6b7280 !important; }
 </style>
 """, unsafe_allow_html=True)
 
