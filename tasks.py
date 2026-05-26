@@ -497,6 +497,9 @@ def upsert_job(data: dict, job_id: str | None = None):
 
 @st.dialog("Task Details", width="large")
 def task_dialog():
+    # Reset immediately so clicking outside the dialog (no Cancel press)
+    # doesn't cause it to reopen on the next page interaction.
+    st.session_state.dlg_open = False
     job_id = st.session_state.get("dlg_job_id")
     job    = next((j for j in st.session_state.jobs if j["id"] == job_id), None) if job_id else None
 
