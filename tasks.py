@@ -846,9 +846,19 @@ if "initialized" not in st.session_state:
         "dlg_job_id":    None,
         "dlg_location":  tabs[0] if tabs else DEFAULT_TABS[0],
         "initialized":   True,
+        "cal_synced":    False,   # triggers auto-sync below on first load
     })
 
 auto_archive()
+
+# ── Auto-sync calendar on first load of each session ─────────────────────────
+# Runs once per browser session (cal_synced flag prevents repeat on reruns).
+# Only imports new events; purge of deleted events stays manual (too slow for startup).
+if not st.session_state.get("cal_synced") and has_gcal_secrets():
+    st.session_state["cal_synced"] = True
+    n = sync_from_calendar()
+    if n:
+        st.session_state["gcal_toast"] = f"Calendar synced — {n} new task{'s' if n != 1 else ''} imported"
 
 # ── Deferred toasts ───────────────────────────────────────────────────────────
 
